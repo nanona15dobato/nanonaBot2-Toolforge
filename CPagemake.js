@@ -5,7 +5,7 @@ const bot = new mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
     username: process.env.MW_USERNAME, // Botのユーザー名
     password: process.env.MW_PASSWORD, // Botのパスワード
-    userAgent: 'nanonaBot2/1.0.0 (Toolforge)',
+    userAgent: 'nanonaBot2/1.0.1 (Toolforge)',
     defaultParams: { format: 'json' }
 });
 
@@ -18,17 +18,6 @@ function logToFile(message, p) {
     if (p === "pub") fs.appendFileSync(path.join(__dirname, './log/publogs.txt'), logMessage);
     console.log(logMessage.trim());
 }
-/*
-async function getBotState() {
-    try {
-        const page = await bot.read('プロジェクト:カテゴリ関連/キュー/緊急停止');
-        logToFile(`Bot状態取得: ${JSON.stringify(page?.revisions[0])}`);
-        return page?.revisions[0]?.content || '';
-    } catch (error) {
-        logToFile(`Bot状態取得エラー: ${error}`);
-        return '';
-    }
-}*/
 
 (async () => {
     await bot.login();
@@ -42,13 +31,6 @@ async function getBotState() {
     const day = jst.getDate();
     const pageTemplateTitle = 'プロジェクト:カテゴリ関連/議論/日別ページ雛形';
     const newPageTitle = `プロジェクト:カテゴリ関連/議論/${year}年/${month}月${day}日`;
-
-    /* Botの状態確認
-    const botState = await getBotState();
-    if (botState.includes('動作中')) {
-        logToFile('QueueBotは現在動作中です。',"pub");
-        return;
-    }*/
 
     //ページの存在確認
     const pageData = await bot.read(newPageTitle);
@@ -75,18 +57,10 @@ async function getBotState() {
         .replace(/\{page_name\}/g, newPageTitle);
 
     // ページの作成
-    let reedit01 = await bot.edit(newPageTitle, async () => {
-        return {
-            text: newPageContent,
-            summary: 'Bot: 議論ページの作成 代理',
-        };
-    });
-    if (reedit01.result === "Success") {
-      logToFile(`[成功] 議論ページの作成 代理: ${newPageTitle}`, "pub"); 
-    } else {
-      logToFile(`議論ページの作成 代理: ${newPageTitle}[${reedit01.result}]`, "pub"); 
-    }
+    const reedit01 = await bot.create(newPageTitle, newPageContent, 'Bot: 議論ページの作成');
+
     logToFile(`ページ内容:\n${newPageContent}`);
     logToFile(JSON.stringify(reedit01));
 
+    if (reedit01.result === "Success") { logToFile(`[成功] 議論ページの作成: ${newPageTitle}`, "pub"); } else { logToFile(`議論ページの作成: ${newPageTitle}[${reedit01.result}]`, "pub"); }
 })();
