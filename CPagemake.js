@@ -1,11 +1,12 @@
-const { mwn } = require('mwn');
+const { Mwn } = require('mwn');
 const fs = require('fs');
 var path = require("path");
-const bot = new mwn({
+const { checkTaskStatusAndExit } = require('./getTasks');
+const bot = new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
     username: process.env.MW_USERNAME, // Botのユーザー名
     password: process.env.MW_PASSWORD, // Botのパスワード
-    userAgent: 'nanonaBot2/1.0.1 (Toolforge)',
+    userAgent: 'nanonaBot2/CPagemake 1.0.3 (Toolforge)',
     defaultParams: { format: 'json' }
 });
 
@@ -20,6 +21,7 @@ function logToFile(message, p) {
 }
 
 (async () => {
+    await checkTaskStatusAndExit('nnId1');
     await bot.login();
     logToFile('ログイン成功');
 
