@@ -2,6 +2,7 @@ const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
 const { Mwn } = require('mwn');
+const { checkTaskStatusAndExit } = require('./getTasks');
 
 /**
  * 版数4500以上のページ一覧を取得（履歴を分離したページを除外）
@@ -109,25 +110,26 @@ function getNamespaceName(namespace) {
 
 
 async function main() {
+    await checkTaskStatusAndExit('nnId2');
     try {
         const bot = new Mwn({
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
             username: process.env.MW_USERNAME,
             password: process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 0.1.0',
+            userAgent: 'nanonaBot2/gethighrevs 0.1.1 (Toolforge)',
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)
-        //const now = new Date();
-        //console.log(`現在時刻: ${now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`);
-        const highRevPages = await getHighRevisionPages();/*
+        const now = new Date();
+        console.log(`現在時刻: ${now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`);
+        const highRevPages = await getHighRevisionPages();
         console.log(`取得したページ数: ${highRevPages.length}`);
         //所要時間
         const elapsedTime = (new Date() - now) / 1000;
         //分・秒に変換
         const minutes = Math.floor(elapsedTime / 60);
         const seconds = Math.floor(elapsedTime % 60);
-        console.log(`所要時間: ${minutes}分${seconds}秒`);*/
+        console.log(`所要時間: ${minutes}分${seconds}秒`);
         // Wikitable形式で出力
         let wikitable = '';
         if (highRevPages.length >= 500) wikitable += `版数4500以上のページは500件以上ありました。\n`;
@@ -143,10 +145,10 @@ async function main() {
             }
             wikitable += `|}\n`;
         }
-        //console.log(wikitable);
+        console.log(wikitable);
         let wikitext = `最終更新: ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}\n\n${wikitable}`;
         await bot.login();
-        //console.log('ログイン成功');
+        console.log('ログイン成功');
         const sandboxTitle = '利用者:NanonaBot2/版数の多いページ一覧';
         await bot.edit(sandboxTitle, () => {
             return {
