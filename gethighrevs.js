@@ -2,7 +2,12 @@ const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
 const { Mwn } = require('mwn');
-const { checkTaskStatusAndExit } = require('./getTasks');
+const { checkTaskStatusAndExit } = require('./utils/getTasks');
+const { parseTemplate, splitWithContext, escapeRegex, parseSection } = require('./utils/parse.js');
+const { logger } = require("./utils/logger");
+const taskId = 'nnId2';
+const ListminRevisions = 4000;
+const ANminRevisions = 4500;
 
 /**
  * 版数4500以上のページ一覧を取得（履歴を分離したページを除外）
@@ -47,6 +52,7 @@ async function getHighRevisionPages(options = {}) {
             }
 
             if (!config.user || !config.password) {
+                logger.error(taskId, '認証に失敗しました。', true);
                 throw new Error('認証情報を取得できませんでした');
             }
         }
@@ -110,29 +116,40 @@ function getNamespaceName(namespace) {
 
 
 async function main() {
-    await checkTaskStatusAndExit('nnId2');
+    await checkTaskStatusAndExit(taskId);
     try {
         const bot = new Mwn({
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
             username: process.env.MW_USERNAME,
             password: process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 0.1.1 (Toolforge)',
+            userAgent: 'nanonaBot2/gethighrevs 0.2.4',
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)
         const now = new Date();
-        console.log(`現在時刻: ${now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}`);
-        const highRevPages = await getHighRevisionPages();
+        const nowtext = now.toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' });
+        console.log(`現在時刻: ${nowtext}`);
+
+        const highRevPages = await getHighRevisionPages({ minRevisions: ListminRevisions, limit: 500 });
+        //highRevPagesをファイルとして保存
+        const outputPath = path.join(__dirname, 'highRevPages.json');
+        await fs.writeFile(outputPath, JSON.stringify(highRevPages, null, 2), 'utf8');
+        console.log(`ページ情報を ${outputPath} に保存しました。`);
+        /*
+        //highRevPages.jsonから読み込む
+        const highRevPages = JSON.parse(await fs.readFile(path.join(__dirname, 'highRevPages.json'), 'utf8'));*/
         console.log(`取得したページ数: ${highRevPages.length}`);
         //所要時間
         const elapsedTime = (new Date() - now) / 1000;
-        //分・秒に変換
         const minutes = Math.floor(elapsedTime / 60);
         const seconds = Math.floor(elapsedTime % 60);
         console.log(`所要時間: ${minutes}分${seconds}秒`);
         // Wikitable形式で出力
         let wikitable = '';
+        let ANtext = `以下のページの版数が${ANminRevisions}以上のため、履歴保存を依頼します。\n${nowtext}現在\n\n`;
         if (highRevPages.length >= 500) wikitable += `版数4500以上のページは500件以上ありました。\n`;
+        await bot.login();
+        let ANCount = 0;
         if (highRevPages.length === 0) {
             wikitable += '版数4500以上のページはありませんでした。';
         } else {
@@ -142,12 +159,49 @@ async function main() {
                 //標準名前空間は[[ページ名]]、他は[[名前空間:ページ名]]
                 const pageTitle = page.page_namespace === 0 ? page.page_title : `${namespaceName}:${page.page_title}`;
                 wikitable += `|-\n| ${page.page_id} || [[${pageTitle}]] || ${page.revision_count}\n`;
+
+                if (page.revision_count >= ANminRevisions) {
+                    ANCount++;
+                    /* ======WP:AN報告===== */
+
+                    // 初版取得
+                    //
+                    const firstRevQuery = await bot.request({
+                        action: 'query',
+                        prop: 'revisions',
+                        titles: pageTitle,
+                        rvlimit: 1,
+                        rvdir: 'newer',
+                        rvslots: '*',
+                        rvprop: 'content',
+                        formatversion: 2
+                    });
+                    const firstText = firstRevQuery.query.pages[0].revisions[0].slots.main.content;
+
+                    // 初版がリダイレクトかつCategory:履歴を分離したページにカテゴライズされているか判定
+                    let redirectTarget = null;
+                    let categorized = false;
+                    const redirectMatch = firstText.match(/^#(?:REDIRECT|転送)[ \t]*\[\[([^\]]*)\]\]/i);
+                    if (redirectMatch) {
+                        redirectTarget = redirectMatch[1];
+
+                        const catCheck = await bot.request({
+                            action: 'query',
+                            prop: 'categories',
+                            titles: redirectTarget,
+                            clcategories: 'Category:履歴を分離したページ',
+                            formatversion: 2
+                        });
+                        categorized = catCheck.query.pages[0]?.categories?.length > 0;
+                    }
+                    ANtext += `* {{利用者:NanonaBot2/nnId2/Tmp|${page.page_id}|${page.revision_count}${categorized ? `|${redirectTarget}` : ''}}}\n`;
+                }
             }
             wikitable += `|}\n`;
+            ANtext += `以上${ANCount}ページ、お願いいたします。--~~~~\n`;
         }
         console.log(wikitable);
-        let wikitext = `最終更新: ${new Date().toLocaleString('ja-JP', { timeZone: 'Asia/Tokyo' })}\n\n${wikitable}`;
-        await bot.login();
+        let wikitext = `最終更新: ${nowtext}\n\n${wikitable}`;
         console.log('ログイン成功');
         const sandboxTitle = '利用者:NanonaBot2/版数の多いページ一覧';
         await bot.edit(sandboxTitle, () => {
@@ -156,8 +210,45 @@ async function main() {
                 summary: 'Bot:版数の多いページ一覧を更新',
             };
         });
+        logger.success(taskId, `版数の多いページを更新しました（計:${highRevPages.length}ページ）`, true);
         console.log(`結果を ${sandboxTitle} に保存しました。`);
+
+        //await bot.edit('Wikipedia:管理者伝言板/各種初期化依頼', (rev) => {
+        await bot.edit('利用者:NanonaBot2/Sandbox2', (rev) => {
+            let text = rev.content;
+            let ANsections = parseSection(text, 3);
+            let RevSection = ANsections.find(section => section.name === '履歴保存依頼' && section.seclevel === 2);
+            if (!RevSection && ANCount > 0) {
+                text += `\n\n== 履歴保存依頼 ==\n${ANtext}`;
+                ANsections = parseSection(text, 3);
+            } else if (ANCount > 0) {
+                text = text.replace(RevSection.wikitext, "== 履歴保存依頼 ==\n" + ANtext);
+            } else {
+                text = text.replace(RevSection.wikitext, "");
+            }
+
+            return {
+                text: text,
+                notminor: true,
+                bot: false,
+                summary: highRevPages.length > 0 ? `版数の多いページの履歴保存依頼を更新しました（${ANCount}件）` : '版数の多いページの履歴保存依頼を除去しました（0件）',
+            }
+        }).then(res => {
+            if (res.result === 'Success') {
+                let ANsummary = highRevPages.length > 0 ? `Bot： 版数の多いページの履歴保存依頼 更新（${ANCount}件）` : `Bot： 版数の多いページの履歴保存依頼 除去（0件）`;
+                console.log('履歴保存依頼を送信しました:', res);
+                logger.success(taskId, ANsummary, true);
+            } else {
+                console.error('履歴保存依頼の送信に失敗しました:', res);
+                logger.error(taskId, `履歴保存依頼の更新に失敗しました`, true);
+            }
+        }).catch(err => {
+            console.error('履歴保存依頼の送信に失敗しました:', err);
+            logger.error(taskId, `履歴保存依頼の更新に失敗しました`, true);
+        });
+
     } catch (error) {
+        logger.error(taskId, `エラーが発生しました`, true);
         console.error('エラー:', error.message);
     }
 }
