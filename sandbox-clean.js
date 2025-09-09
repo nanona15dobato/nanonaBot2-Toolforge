@@ -1,6 +1,7 @@
 const { Mwn } = require('mwn');
 const fs = require('fs');
 const path = require('path');
+const { setTimeout } = require("node:timers/promises");
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { parseTemplate, splitWithContext, escapeRegex, parseSection } = require('./utils/parse.js');
 const { logger } = require("./utils/logger");
@@ -13,7 +14,7 @@ const bot = new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
     username: process.env.MW_USERNAME,
     password: process.env.MW_PASSWORD,
-    userAgent: 'nanonaBot2/sandbox-clean 0.2.0',
+    userAgent: 'nanonaBot2/sandbox-clean 0.2.1',
     defaultParams: { format: 'json' }
 });
 
@@ -100,7 +101,8 @@ async function cleanstart() {
                 logger.error(taskId, `白紙化に失敗しました: ${sandboxTitle}（版数: ${total}）`, true);
             }
         }
-
+        // 10秒待機
+        await setTimeout(10000);
     }
     if (ANreq.length > 0) {
         await bot.edit('Wikipedia:管理者伝言板/各種初期化依頼', (rev) => {

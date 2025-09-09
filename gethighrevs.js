@@ -1,6 +1,7 @@
 const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
+const { setTimeout } = require("node:timers/promises");
 const { Mwn } = require('mwn');
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { parseTemplate, splitWithContext, escapeRegex, parseSection } = require('./utils/parse.js');
@@ -8,7 +9,7 @@ const { logger } = require("./utils/logger");
 const taskId = 'nnId2';
 const ListminRevisions = 4000;
 const ANminRevisions = 4500;
-
+let lastedit;
 /**
  * 版数4500以上のページ一覧を取得（履歴を分離したページを除外）
  * @param {Object} options - オプション
@@ -116,13 +117,15 @@ function getNamespaceName(namespace) {
 
 
 async function main() {
+    //制御確認
     await checkTaskStatusAndExit(taskId);
+
     try {
         const bot = new Mwn({
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
             username: process.env.MW_USERNAME,
             password: process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 0.2.4',
+            userAgent: 'nanonaBot2/gethighrevs 0.2.8',
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)
@@ -165,7 +168,6 @@ async function main() {
                     /* ======WP:AN報告===== */
 
                     // 初版取得
-                    //
                     const firstRevQuery = await bot.request({
                         action: 'query',
                         prop: 'revisions',
@@ -204,14 +206,23 @@ async function main() {
         let wikitext = `最終更新: ${nowtext}\n\n${wikitable}`;
         console.log('ログイン成功');
         const sandboxTitle = '利用者:NanonaBot2/版数の多いページ一覧';
-        await bot.edit(sandboxTitle, () => {
+        let ANre = await bot.edit(sandboxTitle, () => {
             return {
                 text: wikitext,
                 summary: 'Bot:版数の多いページ一覧を更新',
             };
+        }).then(res => {
+            if (res.result === 'Success') {
+                logger.success(taskId, `版数の多いページ一覧を更新しました: ${sandboxTitle}`, true);
+            } else {
+                logger.error(taskId, `版数の多いページ一覧の更新に失敗しました: ${sandboxTitle}`, true);
+            }
+        }).catch(err => {
+            logger.error(taskId, `版数の多いページ一覧の更新に失敗しました: ${sandboxTitle}`, true);
+            return { result: 'Error', error: err };
         });
-        logger.success(taskId, `版数の多いページを更新しました（計:${highRevPages.length}ページ）`, true);
-        console.log(`結果を ${sandboxTitle} に保存しました。`);
+        //10秒待機
+        await setTimeout(10000);
 
         //await bot.edit('Wikipedia:管理者伝言板/各種初期化依頼', (rev) => {
         await bot.edit('利用者:NanonaBot2/Sandbox2', (rev) => {
