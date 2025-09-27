@@ -6,6 +6,7 @@ const { Mwn } = require('mwn');
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { parseTemplate, splitWithContext, escapeRegex, parseSection } = require('./utils/parse.js');
 const { logger } = require("./utils/logger");
+const { log } = require('node:console');
 const taskId = 'nnId2';
 const ListminRevisions = 4000;
 const ANminRevisions = 4500;
@@ -120,12 +121,13 @@ async function main() {
     //制御確認
     await checkTaskStatusAndExit(taskId);
 
+
     try {
         const bot = new Mwn({
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
             username: process.env.MW_USERNAME,
             password: process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 0.2.8',
+            userAgent: 'nanonaBot2/gethighrevs 0.3.0',
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)
@@ -200,7 +202,7 @@ async function main() {
                 }
             }
             wikitable += `|}\n`;
-            ANtext += `以上${ANCount}ページ、お願いいたします。--~~~~\n`;
+            ANtext += `以上${ANCount}ページ、お願いいたします。<br />本報告は、[[WP:B/R#nanonaBot2_20250813|WP:B/R]]に申請中の作業の仮運用として行っているものです。--Botによる抽出・報告:~~~~\n`;
         }
         console.log(wikitable);
         let wikitext = `最終更新: ${nowtext}\n\n${wikitable}`;
@@ -224,8 +226,8 @@ async function main() {
         //10秒待機
         await setTimeout(10000);
 
-        //await bot.edit('Wikipedia:管理者伝言板/各種初期化依頼', (rev) => {
-        await bot.edit('利用者:NanonaBot2/Sandbox2', (rev) => {
+        await bot.edit('Wikipedia:管理者伝言板/各種初期化依頼', (rev) => {
+        //await bot.edit('利用者:NanonaBot2/Sandbox2', (rev) => {
             let text = rev.content;
             let ANsections = parseSection(text, 3);
             let RevSection = ANsections.find(section => section.name === '履歴保存依頼' && section.seclevel === 2);
