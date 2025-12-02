@@ -151,7 +151,7 @@ async function main() {
         console.log(`所要時間: ${minutes}分${seconds}秒`);
         // Wikitable形式で出力
         let wikitable = '';
-        let ANtext = `以下のページの版数が${ANminRevisions}以上のため、履歴保存を依頼します。\n${nowtext}現在\n\n`;
+        let ANtext = `\n以下のページの版数が${ANminRevisions}以上のため、履歴保存を依頼します。\n${nowtext}現在\n\n`;
         if (highRevPages.length >= 500) wikitable += `版数4500以上のページは500件以上ありました。\n`;
         await bot.login();
         let ANCount = 0;
@@ -223,6 +223,8 @@ async function main() {
             logger.error(taskId, `版数の多いページ一覧の更新に失敗しました: ${sandboxTitle}`, true);
             return { result: 'Error', error: err };
         });
+
+	if (ANCount < 1) return; 
         //10秒待機
         await setTimeout(10000);
 
@@ -232,12 +234,10 @@ async function main() {
             let ANsections = parseSection(text, 3);
             let RevSection = ANsections.find(section => section.name === '履歴保存依頼' && section.seclevel === 2);
             if (!RevSection && ANCount > 0) {
-                text += `\n\n== 履歴保存依頼 ==\n${ANtext}`;
+                text += `\n\n== 履歴保存依頼 ==${ANtext}`;
                 ANsections = parseSection(text, 3);
             } else if (ANCount > 0) {
-                text = text.replace(RevSection.wikitext, "== 履歴保存依頼 ==\n" + ANtext);
-            } else {
-                text = text.replace(RevSection.wikitext, "");
+                text = text.replace(RevSection.wikitext, RevSection.wikitext + ANtext);
             }
 
             return {
