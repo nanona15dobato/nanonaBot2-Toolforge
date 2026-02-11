@@ -127,7 +127,7 @@ async function main() {
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
             username: process.env.MW_USERNAME,
             password: process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 0.3.0',
+            userAgent: 'nanonaBot2/gethighrevs 1.0.2',
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)
@@ -151,7 +151,7 @@ async function main() {
         console.log(`所要時間: ${minutes}分${seconds}秒`);
         // Wikitable形式で出力
         let wikitable = '';
-        let ANtext = `\n以下のページの版数が${ANminRevisions}以上のため、履歴保存を依頼します。\n${nowtext}現在\n\n`;
+        let ANtext = `\n\n以下のページの版数が${ANminRevisions}以上のため、履歴保存を依頼します。\n`;
         if (highRevPages.length >= 500) wikitable += `版数4500以上のページは500件以上ありました。\n`;
         await bot.login();
         let ANCount = 0;
@@ -202,7 +202,7 @@ async function main() {
                 }
             }
             wikitable += `|}\n`;
-            ANtext += `以上${ANCount}ページ、お願いいたします。<br />本報告は、[[WP:B/R#nanonaBot2_20250813|WP:B/R]]に申請中の作業の仮運用として行っているものです。--Botによる抽出・報告:~~~~\n`;
+            ANtext += `以上${ANCount}ページ、お願いいたします。--Botによる抽出・報告:~~~~\n`;
         }
         console.log(wikitable);
         let wikitext = `最終更新: ${nowtext}\n\n${wikitable}`;
@@ -244,11 +244,12 @@ async function main() {
                 text: text,
                 notminor: true,
                 bot: false,
-                summary: highRevPages.length > 0 ? `版数の多いページの履歴保存依頼を更新しました（${ANCount}件）` : '版数の多いページの履歴保存依頼を除去しました（0件）',
+                tags: 'non-bot action by bot',
+                summary: `版数の多いページの履歴保存依頼（${ANCount}件）`,
             }
         }).then(res => {
             if (res.result === 'Success') {
-                let ANsummary = highRevPages.length > 0 ? `Bot： 版数の多いページの履歴保存依頼 更新（${ANCount}件）` : `Bot： 版数の多いページの履歴保存依頼 除去（0件）`;
+                let ANsummary = highRevPages.length > 0 ? `Bot： 版数の多いページの履歴保存依頼（${ANCount}件）`;
                 console.log('履歴保存依頼を送信しました:', res);
                 logger.success(taskId, ANsummary, true);
             } else {
