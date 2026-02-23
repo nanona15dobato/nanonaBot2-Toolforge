@@ -1,13 +1,32 @@
 const { Mwn } = require('mwn');
+const fs = require('fs');
+const path = require('path');
 
 // MediaWiki APIクライアントの初期化
 const bot = new Mwn({
     apiUrl: 'https://meta.wikimedia.org/w/api.php',
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
-    userAgent: 'nanonaBot2/getTasks 1.2.1',
+    userAgent: 'nanonaBot2/getTasks 1.2.2',
     defaultParams: { format: 'json' }
 });
+const pageTitle = 'User:NanonaBot2/tasks/data';
+
+/**
+ * メタウィキからタスクデータを取得する関数
+ * @returns {String}  - wikitext
+ */
+async function getTaskdata() {
+    try {
+        await bot.login();
+        const page = await bot.read(pageTitle);
+        return page?.revisions?.[0]?.content || '';
+    } catch (error) {
+        console.error('タスクデータの取得中にエラーが発生しました:', error);
+        throw error;
+    }
+}
+
 
 
 /**
@@ -30,24 +49,63 @@ function parseTaskData(wikitext) {
 }
 
 /**
+ * タスク状態をjawpへも反映
+ * @param {Record<string, string>} data - タスク状態を含むオブジェクト
+ */
+async function updateTaskStatus(data) {
+    //dataがない場合は取得
+    if (!data) {
+        const wikitext = await getTaskdata();
+        data = parseTaskData(wikitext);
+    }
+
+    // ../data/lastTaskData.jsonと比較して変更がない場合は更新しない
+    const lastDataPath = path.join(__dirname, '../data/lastTaskData.json');
+    let lastData = {};
+    try {
+        const lastDataContent = fs.readFileSync(lastDataPath, 'utf-8');
+        lastData = JSON.parse(lastDataContent);
+    } catch (e) { }
+
+    if (JSON.stringify(data) === JSON.stringify(lastData)) return;
+
+    let wikitext = '';
+    for (const [key, value] of Object.entries(data)) {
+        wikitext += `'${key}'='${value}'\n`;
+    }
+    wikitext = "<!-- 稼働制御は[[m:"+ pageTitle + "]]にてお願い致します。-->\n" + wikitext.trimEnd();
+
+    const jawpbot = new Mwn({
+        apiUrl: 'https://ja.wikipedia.org/w/api.php',
+        username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
+        password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
+        userAgent: 'nanonaBot2/getTasks 1.2.0',
+        defaultParams: { format: 'json' }
+    });
+    await jawpbot.login();
+    const re = await jawpbot.save('利用者:NanonaBot2/tasks/data', wikitext, 'Bot: タスク状態の更新');
+    if (re.result !== 'Success') {
+        console.error('タスク状態の更新に失敗しました:', re);
+        return;
+    }
+    fs.writeFileSync(lastDataPath, JSON.stringify(data, null, 2), 'utf-8');
+}
+
+/**
  * 指定されたタスクIDの稼働状況を取得する関数
  * @param {string} taskId - チェックするタスクID (例: 'nnId1', 'nnId2')
  * @returns {Promise<string|null>} タスクの状態値、または null（エラー時）
  */
 async function getTaskStatus(taskId) {
     try {
-        await bot.login();
-
-        const pageTitle = 'User:NanonaBot2/tasks/data';
-        const page = await bot.read(pageTitle);
-        const wikitext = page?.revisions?.[0]?.content;
-
+        const wikitext = await getTaskdata();
         if (!wikitext) {
             console.error('ページが見つからないか、読み取りに失敗しました');
             return null;
         }
 
         const data = parseTaskData(wikitext);
+        updateTaskStatus(data);
 
         if (data.ALL !== '1') {
             return '0';
@@ -104,5 +162,6 @@ if (require.main === module) {
 
 module.exports = {
     getTaskStatus,
-    checkTaskStatusAndExit
+    checkTaskStatusAndExit,
+    updateTaskStatus
 };
