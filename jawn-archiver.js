@@ -53,7 +53,7 @@ async function archivepage(pid) {
                 sucerr = "既にアーカイブ済のテンプレートが存在しています。";
                 throw new Error(sucerr);
             }
-            const templateRegex = /(([^は]\{\{\s*公開中\s*(?:\|[^\{\}]*)?\}\})([^\S\n\r]*)(\n)?)/;
+            const templateRegex = /(((?:^|[^は])\{\{\s*公開中\s*(?:\|[^\{\}]*)?\}\})([^\S\n\r]*)(\n)?)/;
             const match = wikitext.match(templateRegex);
             if (!match) {
                 sucerr = "公開中テンプレートが見つかりませんでした。";
