@@ -4,10 +4,9 @@ const path = require('path');
 const { setTimeout } = require("node:timers/promises");
 const { Mwn } = require('mwn');
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
-const { parseTemplate, splitWithContext, escapeRegex, parseSection } = require('./utils/parse.js');
+const { parseSection } = require('./utils/parse.js');
 const { logger } = require("./utils/logger");
-const { log } = require('node:console');
-const taskId = 'nnId2';
+const taskId = 'w-ja-nn2';
 const ListminRevisions = 4000;
 const ANminRevisions = 4500;
 let lastedit;
@@ -125,9 +124,9 @@ async function main() {
     try {
         const bot = new Mwn({
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
-            username: process.env.MW_USERNAME,
-            password: process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 1.0.2',
+            username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
+            password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
+            userAgent: 'nanonaBot2/gethighrevs 1.1.0',
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)
@@ -249,7 +248,7 @@ async function main() {
             }
         }).then(res => {
             if (res.result === 'Success') {
-                let ANsummary = highRevPages.length > 0 ? `Bot： 版数の多いページの履歴保存依頼（${ANCount}件）`;
+                let ANsummary = `Bot： 版数の多いページの履歴保存依頼（${ANCount}件）`;
                 console.log('履歴保存依頼を送信しました:', res);
                 logger.success(taskId, ANsummary, true);
             } else {

@@ -1,20 +1,18 @@
 const { Mwn } = require('mwn');
-const fs = require('fs');
-const path = require('path');
 const { setTimeout } = require("node:timers/promises");
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
-const { parseTemplate, splitWithContext, escapeRegex, parseSection } = require('./utils/parse.js');
+const { parseSection } = require('./utils/parse.js');
 const { logger } = require("./utils/logger");
-const taskId = 'nnId3';
+const taskId = 'w-ja-nn3';
 
 
 const revlimit = 4500; // 報告版数
 
 const bot = new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
-    username: process.env.MW_USERNAME,
-    password: process.env.MW_PASSWORD,
-    userAgent: 'nanonaBot2/sandbox-clean 0.2.1',
+    username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
+    password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
+    userAgent: 'nanonaBot2/sandbox-clean 1.1.0',
     defaultParams: { format: 'json' }
 });
 
@@ -115,7 +113,7 @@ async function cleanstart() {
             for (const req of ANreq) {
                 let sandboxSection = ANsections.find(section => section.name === req.ANscname && section.seclevel === 2);
                 if (!sandboxSection && !Insection.includes(req.ANscname)) {
-                    text += `\n\n== ${req.ANscname} ==\n=== ${req.title}の貝塚送り ===\n* {{Page|${req.title}}} (${req.total}版)の貝塚送りをお願い致します。--~~~~\n`;
+                    text += `\n\n== ${req.ANscname} ==\n=== ${req.title}の貝塚送り ===\n* {{Page|${req.title}}} (${req.total}版)の貝塚送りをお願い致します。--Botによる報告:~~~~\n`;
                     ANsections = parseSection(text, 3);
                     console.log(ANsections);
                     Insection.push(req.ANscname);
@@ -123,7 +121,7 @@ async function cleanstart() {
                 }
                 let sandboxTitle = ANsections.find(section => section.name === `${req.title}の貝塚送り` && section.seclevel === 3);
                 if (!sandboxTitle) {
-                    text = text.replace(sandboxSection.wikitext, sandboxSection.wikitext + `\n=== ${req.title}の貝塚送り ===\n* {{Page|${req.title}}} (${req.total}版)の貝塚送りをお願い致します。--~~~~\n`);
+                    text = text.replace(sandboxSection.wikitext, sandboxSection.wikitext + `\n=== ${req.title}の貝塚送り ===\n* {{Page|${req.title}}} (${req.total}版)の貝塚送りをお願い致します。--Botによる報告:~~~~\n`);
                 }
             }
 
