@@ -27,8 +27,6 @@ async function getTaskdata() {
     }
 }
 
-
-
 /**
  * wikitextから 'key'='value' 形式を抽出してオブジェクト化
  * @param {string} wikitext
@@ -50,7 +48,7 @@ function parseTaskData(wikitext) {
 
 /**
  * タスク状態をjawpへも反映
- * @param {Record<string, string>} data - タスク状態を含むオブジェクト
+ * @param {Record<string, string>} [data] - タスク状態を含むオブジェクト
  */
 async function updateTaskStatus(data) {
     //dataがない場合は取得
@@ -67,7 +65,10 @@ async function updateTaskStatus(data) {
         lastData = JSON.parse(lastDataContent);
     } catch (e) { }
 
-    if (JSON.stringify(data) === JSON.stringify(lastData)) return;
+    if (JSON.stringify(data) === JSON.stringify(lastData)) {
+        console.log('タスク状態に変更がないため、更新をスキップしました。');
+        return;
+    }
 
     let wikitext = '';
     for (const [key, value] of Object.entries(data)) {
@@ -89,6 +90,7 @@ async function updateTaskStatus(data) {
         return;
     }
     fs.writeFileSync(lastDataPath, JSON.stringify(data, null, 2), 'utf-8');
+    console.log('タスク状態の更新が完了しました。');
 }
 
 /**
@@ -142,22 +144,33 @@ async function checkTaskStatusAndExit(taskId) {
 
 // コマンドライン引数での直接実行をサポート
 if (require.main === module) {
-    const taskId = process.argv[2];
+    const arg = process.argv[2];
 
-    if (!taskId) {
+    if (!arg) {
         console.error('使用方法:');
         console.error('node getTasks.js <taskId>  - タスクの状態を取得');
+        console.error('node getTasks.js update    - タスク状態を更新して終了');
         process.exit(1);
     }
 
-    getTaskStatus(taskId).then(status => {
-        if (status !== null) {
-            console.log(`タスク ${taskId} の状態: ${status}`);
-        } else {
-            console.error('状態の取得に失敗しました');
+    if (arg === 'update') {
+        // 'update' が指定された場合は updateTaskStatus を実行
+        console.log('タスク状態の更新プロセスを開始します...');
+        updateTaskStatus().catch(error => {
+            console.error('手動更新中にエラーが発生しました:', error);
             process.exit(1);
-        }
-    });
+        });
+    } else {
+        // それ以外は従来の taskId として処理
+        getTaskStatus(arg).then(status => {
+            if (status !== null) {
+                console.log(`タスク ${arg} の状態: ${status}`);
+            } else {
+                console.error('状態の取得に失敗しました');
+                process.exit(1);
+            }
+        });
+    }
 }
 
 module.exports = {
