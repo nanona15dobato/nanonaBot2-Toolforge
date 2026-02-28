@@ -1,6 +1,4 @@
 const { Mwn } = require('mwn');
-const fs = require('fs');
-var path = require("path");
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { logger } = require("./utils/logger");
 const bot = new Mwn({
