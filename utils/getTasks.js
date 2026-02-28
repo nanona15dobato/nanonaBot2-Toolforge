@@ -121,7 +121,7 @@ async function getTaskStatus(taskId) {
 /**
  * 他のファイルから呼び出される際の状態チェック関数
  * @param {string} taskId - チェックするタスクID
- * @returns {Promise<boolean>} true: 続行可能 (値が1), false: 終了すべき (値が1以外)
+ * @returns {Promise<boolean>} タスクが稼働中の場合に true を返します。それ以外の場合は process.exit() によりプロセスを終了し、呼び出し元には戻りません。
  */
 async function checkTaskStatusAndExit(taskId) {
     const status = await getTaskStatus(taskId);
