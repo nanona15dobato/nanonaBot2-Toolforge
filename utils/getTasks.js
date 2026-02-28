@@ -79,7 +79,7 @@ async function updateTaskStatus(data) {
         apiUrl: 'https://ja.wikipedia.org/w/api.php',
         username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
         password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
-        userAgent: 'nanonaBot2/getTasks 1.2.0',
+        userAgent: 'nanonaBot2/getTasks 1.2.2',
         defaultParams: { format: 'json' }
     });
     await jawpbot.login();
