@@ -6,7 +6,7 @@ const bot = new Mwn({
     apiUrl: 'https://ja.wikinews.org/w/api.php',
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
-    userAgent: 'nanonaBot2/archiver 0.5.0',
+    userAgent: 'nanonaBot2/archiver 1.0.0',
     defaultParams: { format: 'json' }
 });
 const taskId = 'n-ja-nn1';
@@ -20,7 +20,7 @@ async function getpageids() {
         list: 'search',
         srsearch: 'incategory:公開中 -incategory:アーカイブ済 -incategory:自動アーカイブ済',
         srnamespace: 0,
-        srlimit: 10,
+        srlimit: 500,
         srprop: 'timestamp',
         srsort: 'last_edit_asc',
         formatversion: 2
@@ -30,7 +30,6 @@ async function getpageids() {
         const editedDate = new Date(item.timestamp);
         if (editedDate <= archivetimeUTC) {
             pages.push(item.pageid);
-            console.log('アーカイブ対象ページ追加:', item.pageid, item.title, item.timestamp);
         }
     }
 
@@ -43,7 +42,7 @@ async function archivepage(pid) {
         const res = await bot.edit(pid, async (rev) => {
             const wikitext = rev.content;
             let newtext = wikitext;
-            const allow = await allowBots(wikitext, "Nanona15dobato");
+            const allow = await allowBots(wikitext, "NanonaBot2");
             if (!allow) {
                 sucerr = "テンプレート:Botsの設定で編集が拒否されました。";
                 throw new Error(sucerr);
@@ -74,7 +73,6 @@ async function archivepage(pid) {
         });
         if (res.result === 'Success') {
             try {
-                console.log(`ページ「${pid}」の編集に成功しました。保護処理を開始します。`);
                 const csrfToken = await bot.getCsrfToken();
                 const re = await bot.request({
                     action: 'protect',
@@ -85,7 +83,6 @@ async function archivepage(pid) {
                     token: csrfToken
                 });
                 sucerr = "success";
-                console.log(`ページ「${pid}」を保護しました。`);
             } catch (err) {
                 sucerr = "ページ保護に失敗しました。";
                 console.error(`ページ「${pid}」の保護に失敗しました:`, err);
@@ -108,14 +105,11 @@ async function archivepage(pid) {
     logger.success(taskId, 'ログイン成功');
 
     const pages = await getpageids();
-    //const pages = [45076];
 
     let successCount = 0;
     let failCount = 0;
     for (const pid of pages) {
-        console.log('アーカイブ処理中:', pid);
         const result = await archivepage(pid);
-        console.log(`アーカイブ処理結果: ${result}`);
         if (result === "success") {
             successCount++;
         } else {
@@ -124,6 +118,10 @@ async function archivepage(pid) {
         }
         await new Promise(resolve => setTimeout(resolve, 5000));
     }
-    console.log(`アーカイブ処理完了。成功: ${successCount} 件、失敗: ${failCount} 件`);
-    logger.info(taskId, `自動アーカイブ処理完了。成功: ${successCount} 件、失敗: ${failCount} 件`, true);
+    const logMessage = `自動アーカイブ処理完了。成功: ${successCount} 件、失敗: ${failCount} 件`;
+    if (failCount > 0) {
+        logger.error(taskId, logMessage, true);
+    } else {
+        logger.success(taskId, logMessage, true);
+    }
 })();
