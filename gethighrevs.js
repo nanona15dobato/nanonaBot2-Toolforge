@@ -74,7 +74,11 @@ async function getHighRevisionPages(options = {}) {
             WHERE p.page_namespace IN (0, 1, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15)
               AND p.page_is_redirect = 0
               AND NOT EXISTS (
-                  SELECT 1 FROM categorylinks WHERE cl_from = p.page_id AND cl_to = '履歴を分離したページ'
+                  SELECT 1 FROM categorylinks cl
+                  INNER JOIN linktarget lt ON cl.cl_target_id = lt.lt_id
+                  WHERE cl.cl_from = p.page_id 
+                    AND lt.lt_namespace = 14
+                    AND lt.lt_title = '履歴を分離したページ'
               )
             GROUP BY p.page_id, p.page_title, p.page_namespace
             HAVING COUNT(*) >= ?
@@ -126,7 +130,7 @@ async function main() {
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
             username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
             password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 1.1.0',
+            userAgent: 'nanonaBot2/gethighrevs 1.2.0',
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)
