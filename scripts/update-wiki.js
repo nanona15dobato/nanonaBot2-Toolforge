@@ -11,7 +11,13 @@ const bot = new Mwn({
 
 async function updateWiki() {
     const jsonPath = path.join(__dirname, '..', 'version_info.json');
-    const jsonData = fs.readFileSync(jsonPath, 'utf8');
+    let jsonData;
+    try {
+        jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
+    } catch (err) {
+        console.error(`Failed to parse version_info.json at ${jsonPath}:`, err);
+        process.exit(1);
+    }
     await bot.login();
     const pageTitle = 'User:NanonaBot2/tasks.json';
     const pageData = await bot.read(pageTitle);
