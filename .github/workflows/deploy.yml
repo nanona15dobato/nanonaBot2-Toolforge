@@ -1,0 +1,88 @@
+name: Deploy Bot and Update Wiki
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  deploy:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Determine Version Bump
+        id: version
+        run: |
+          LABELS="${{ join(github.event.pull_request.labels.*.name, ' ') }}"
+          
+          if [[ "$LABELS" == *"bump:major"* ]]; then
+            echo "bump=major" >> $GITHUB_OUTPUT
+          elif [[ "$LABELS" == *"bump:minor"* ]]; then
+            echo "bump=minor" >> $GITHUB_OUTPUT
+          elif [[ "$LABELS" == *"bump:patch"* ]]; then
+            echo "bump=patch" >> $GITHUB_OUTPUT
+          else
+            echo "bump=none" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Bump package.json version and push
+        if: steps.version.outputs.bump != 'none'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          
+          npm version ${{ steps.version.outputs.bump }} -m "chore(release): bump version to %s"
+          git push origin HEAD:main --tags
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and generate version info
+        run: node scripts/build.js
+
+      - name: Setup SSH for Toolforge
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.TOOLFORGE_PRIVATE_KEY }}
+
+      - name: Add Toolforge to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan login.toolforge.org >> ~/.ssh/known_hosts
+
+      - name: Deploy via rsync
+        env:
+          TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
+          TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
+        run: |
+          rsync -rlptzv --delete --exclude='logs/' --exclude='node_modules/' --exclude='.env' --exclude='replica.my.cnf' --exclude='data/' ./dist/ $TOOL_USER@login.toolforge.org:/data/project/$TOOL_NAME/bot/
+
+      - name: Update Version.json on Wikipedia
+        env:
+          WIKI_USERNAME: ${{ secrets.WIKI_BOT_USERNAME }}
+          WIKI_PASSWORD: ${{ secrets.WIKI_BOT_PASSWORD }}
+        run: node scripts/update-wiki.js
+
+      - name: Install dependencies and update jobs on Toolforge
+        env:
+          TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
+          TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
+        run: |
+          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME bash -c 'cd bot && npm install --production && cd ~ && toolforge jobs load myjobs.yaml'"

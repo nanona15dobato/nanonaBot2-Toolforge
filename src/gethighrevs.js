@@ -1,12 +1,16 @@
 const mysql = require('mysql2/promise');
 const fs = require('fs').promises;
 const path = require('path');
-const { setTimeout } = require("node:timers/promises");
 const { Mwn } = require('mwn');
-const { checkTaskStatusAndExit } = require('./utils/getTasks');
-const { parseSection } = require('./utils/parse.js');
 const { logger } = require("./utils/logger");
+const { setTimeout } = require("node:timers/promises");
+const { parseSection } = require('./utils/parse.js');
+const { checkTaskStatusAndExit } = require('./utils/getTasks');
+
 const taskId = 'w-ja-nn2';
+const nnversion = '__FILE_HASH__';
+
+
 const ListminRevisions = 4000;
 const ANminRevisions = 4500;
 let lastedit;
@@ -130,7 +134,7 @@ async function main() {
             apiUrl: 'https://ja.wikipedia.org/w/api.php',
             username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
             password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
-            userAgent: 'nanonaBot2/gethighrevs 1.2.0',
+            userAgent: `nanonaBot2/gethighrevs [${nnversion}] (Toolforge)`,
             defaultParams: { format: 'json' }
         });
         //現在時刻(JST)

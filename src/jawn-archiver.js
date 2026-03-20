@@ -2,14 +2,20 @@ const { Mwn } = require('mwn');
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { logger } = require("./utils/logger");
 const { allowBots } = require('./utils/parse.js');
+
+
+const taskId = 'n-ja-nn1';
+const nnversion = '__FILE_HASH__';
+
 const bot = new Mwn({
     apiUrl: 'https://ja.wikinews.org/w/api.php',
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
-    userAgent: 'nanonaBot2/archiver 1.0.0',
+    userAgent: `nanonaBot2/archiver [${nnversion}] (Toolforge)`,
     defaultParams: { format: 'json' }
 });
-const taskId = 'n-ja-nn1';
+
+
 const summary = 'Bot: [[ウィキニュース:記事のアーカイブ|記事の自動アーカイブ]]';
 
 async function getpageids() {
