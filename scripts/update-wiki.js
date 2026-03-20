@@ -8,6 +8,13 @@ const bot = new Mwn({
     userAgent: 'nanonaBot2-Deployer/1.0 (GitHub Actions)',
     defaultParams: { format: 'json' }
 });
+const jawpbot = new Mwn({
+    apiUrl: 'https://ja.wikipedia.org/w/api.php',
+    username: process.env.WIKI_USERNAME,
+    password: process.env.WIKI_PASSWORD,
+    userAgent: 'nanonaBot2-Deployer/1.0 (GitHub Actions)',
+    defaultParams: { format: 'json' }
+});
 
 async function updateWiki() {
     const jsonPath = path.join(__dirname, '..', 'version_info.json');
@@ -19,8 +26,7 @@ async function updateWiki() {
         process.exit(1);
     }
     await bot.login();
-    //const pageTitle = 'User:NanonaBot2/tasks.json';
-    const pageTitle = 'User:NanonaBot2/sandbox.json';
+    const pageTitle = 'User:NanonaBot2/tasks.json';
     const pageData = await bot.read(pageTitle);
     const wikiContent = pageData?.revisions[0]?.content || '';
     const wikijson = JSON.parse(wikiContent || '{}');
@@ -37,6 +43,7 @@ async function updateWiki() {
 
     try {
         await bot.save(pageTitle, JSON.stringify(wikijson), '自動デプロイ: バージョン情報を更新');
+        await jawpbot.save(pageTitle, JSON.stringify(wikijson), '自動デプロイ: バージョン情報を更新');
         console.log(`Successfully updated ${pageTitle}`);
     } catch (err) {
         console.error('Failed to update wiki:', err);
