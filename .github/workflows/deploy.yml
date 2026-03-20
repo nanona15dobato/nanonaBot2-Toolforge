@@ -72,7 +72,7 @@ jobs:
           TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
           TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
         run: |
-          rsync -rlzv --omit-dir-times --delete --exclude='logs/' --exclude='node_modules/' --exclude='.env' --exclude='replica.my.cnf' --exclude='data/' --exclude='highRevPages.json' ./dist/ $TOOL_USER@login.toolforge.org:/data/project/$TOOL_NAME/bot/
+          rsync -rlzv --omit-dir-times --rsync-path="become $TOOL_NAME rsync" --delete --exclude='logs/' --exclude='node_modules/' --exclude='.env' --exclude='replica.my.cnf' --exclude='data/' --exclude='highRevPages.json' ./dist/ $TOOL_USER@login.toolforge.org:/data/project/$TOOL_NAME/bot/
 
       - name: Update Version.json on Wikipedia
         env:
