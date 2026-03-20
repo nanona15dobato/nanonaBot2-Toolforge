@@ -3,14 +3,15 @@ const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
 
-const srcDir = path.join(__dirname, '..', 'src');
-const distDir = path.join(__dirname, '..', 'dist');
+const projectRoot = path.join(__dirname, '..');
+const srcDir = path.join(projectRoot, 'src');
+const distDir = path.join(projectRoot, 'dist');
 
 if (!fs.existsSync(distDir)) {
     fs.mkdirSync(distDir, { recursive: true });
 }
 
-const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
+const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
 const overallVersion = pkg.version;
 
 const versionList = {};
@@ -85,7 +86,7 @@ const wikiJsonData = {
 };
 
 fs.writeFileSync(
-    path.join(__dirname, '..', 'version_info.json'),
+    path.join(projectRoot, 'version_info.json'),
     JSON.stringify(wikiJsonData, null, 2)
 );
 
