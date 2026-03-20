@@ -85,4 +85,4 @@ jobs:
           TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
           TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
         run: |
-          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME bash -c 'cd bot2 && npm install --production'"
+          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME -- bash -c 'toolforge jobs delete install-deps || true; toolforge jobs run install-deps --command \"cd bot2 && npm install --production\" --image node20 --wait'"
