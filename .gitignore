@@ -1,0 +1,15 @@
+# Node.js
+node_modules/
+npm-debug.log
+
+# Build output
+dist/
+version_info.json
+
+# Environment variables
+.env
+replica.my.cnf
+
+# Logs
+logs/
+data/

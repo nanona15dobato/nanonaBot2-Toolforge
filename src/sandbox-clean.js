@@ -4,6 +4,7 @@ const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { parseSection } = require('./utils/parse.js');
 const { logger } = require("./utils/logger");
 const taskId = 'w-ja-nn3';
+const nnversion = '__FILE_HASH__';
 
 
 const revlimit = 4500; // 報告版数
@@ -12,7 +13,7 @@ const bot = new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
-    userAgent: 'nanonaBot2/sandbox-clean 1.1.0',
+    userAgent: `nanonaBot2/sandbox-clean [${nnversion}] (Toolforge)`,
     defaultParams: { format: 'json' }
 });
 
