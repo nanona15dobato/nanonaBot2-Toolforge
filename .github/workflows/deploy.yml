@@ -79,10 +79,3 @@ jobs:
           WIKI_USERNAME: ${{ secrets.WIKI_BOT_USERNAME }}
           WIKI_PASSWORD: ${{ secrets.WIKI_BOT_PASSWORD }}
         run: node scripts/update-wiki.js
-
-      - name: Install dependencies and update jobs on Toolforge
-        env:
-          TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
-          TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
-        run: |
-          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME -- bash -c 'toolforge jobs delete install-deps || true; toolforge jobs run install-deps --command \"npm install --prefix bot2 --production\" --image node20 --wait'"
