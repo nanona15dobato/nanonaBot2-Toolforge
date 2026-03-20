@@ -13,8 +13,21 @@ if (!fs.existsSync(distDir)) {
 const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8'));
 const overallVersion = pkg.version;
 
-const files = fs.readdirSync(srcDir).filter(f => f.endsWith('.js'));
 const versionList = {};
+
+function collectJsFiles(dir, results = []) {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            collectJsFiles(fullPath, results);
+        } else if (entry.isFile() && entry.name.endsWith('.js')) {
+            results.push(fullPath);
+        }
+    }
+    return results;
+}
+
+const files = collectJsFiles(srcDir);
 
 function getFileLastModified(absolutePath) {
     try {
@@ -31,9 +44,14 @@ function getFileLastModified(absolutePath) {
     return new Date().toISOString();
 }
 
-files.forEach(file => {
-    const srcPath = path.join(srcDir, file);
-    const distPath = path.join(distDir, file);
+files.forEach(srcPath => {
+    const relPath = path.relative(srcDir, srcPath);
+    const distPath = path.join(distDir, relPath);
+    const distSubDir = path.dirname(distPath);
+
+    if (!fs.existsSync(distSubDir)) {
+        fs.mkdirSync(distSubDir, { recursive: true });
+    }
     
     let content = fs.readFileSync(srcPath, 'utf8');
     
@@ -49,7 +67,7 @@ files.forEach(file => {
         const lastUpdated = getFileLastModified(srcPath);
 
         versionList[taskId] = {
-            file: file,
+            file: relPath,
             hash: hash,
             last_updated: lastUpdated
         };
