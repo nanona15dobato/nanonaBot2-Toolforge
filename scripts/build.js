@@ -74,10 +74,8 @@ files.forEach(srcPath => {
     }
 });
 
-fs.copyFileSync(
-    path.join(__dirname, '..', 'package.json'),
-    path.join(distDir, 'package.json')
-);
+fs.copyFileSync(path.join(projectRoot, 'package.json'), path.join(distDir, 'package.json'));
+fs.copyFileSync(path.join(projectRoot, 'package-lock.json'), path.join(distDir, 'package-lock.json'));
 
 // Wiki更新用のJSONを生成
 const wikiJsonData = {
