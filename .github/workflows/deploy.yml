@@ -74,8 +74,9 @@ jobs:
         run: |
           rsync -rlzv --omit-dir-times --rsync-path="become $TOOL_NAME rsync" --delete --exclude='logs/' --exclude='node_modules/' --exclude='.env' --exclude='replica.my.cnf' --exclude='data/' --exclude='highRevPages.json' ./dist/ $TOOL_USER@login.toolforge.org:/data/project/$TOOL_NAME/bot/
 
-      - name: Update Version.json on Wikipedia
+      - name: Update Wiki and Toolforge jobs
         env:
-          WIKI_USERNAME: ${{ secrets.WIKI_BOT_USERNAME }}
-          WIKI_PASSWORD: ${{ secrets.WIKI_BOT_PASSWORD }}
-        run: node scripts/update-wiki.js
+          TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
+          TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
+        run: |
+          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME -- bash -c 'toolforge jobs delete wiki-update || true; toolforge jobs run wiki-update --command \"node bot/update-wiki.js\" --image node18 --wait'"

@@ -1,18 +1,21 @@
 const fs = require('fs');
 const path = require('path');
 const { Mwn } = require('mwn');
+const username = process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME;
+const password = process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD;
+const userAgent = 'nanonaBot2-Deployer/1.0 (GitHub Actions)';
 const bot = new Mwn({
     apiUrl: 'https://meta.wikimedia.org/w/api.php',
-    username: process.env.WIKI_USERNAME,
-    password: process.env.WIKI_PASSWORD,
-    userAgent: 'nanonaBot2-Deployer/1.0 (GitHub Actions)',
+    username,
+    password,
+    userAgent,
     defaultParams: { format: 'json' }
 });
 const jawpbot = new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
-    username: process.env.WIKI_USERNAME,
-    password: process.env.WIKI_PASSWORD,
-    userAgent: 'nanonaBot2-Deployer/1.0 (GitHub Actions)',
+    username,
+    password,
+    userAgent,
     defaultParams: { format: 'json' }
 });
 
@@ -47,7 +50,7 @@ async function updateWiki() {
         console.log(`Successfully updated ${pageTitle}`);
     } catch (err) {
         console.error('Failed to update wiki:', err);
-        process.exit(1); // Actionsのジョブを失敗扱いにするためエラー終了
+        process.exit(1);
     }
 }
 

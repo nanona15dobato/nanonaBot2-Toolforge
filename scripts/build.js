@@ -85,9 +85,12 @@ const wikiJsonData = {
     files: versionList
 };
 
-fs.writeFileSync(
-    path.join(projectRoot, 'version_info.json'),
-    JSON.stringify(wikiJsonData, null, 2)
+
+fs.writeFileSync(path.join(projectRoot, 'version_info.json'), JSON.stringify(wikiJsonData, null, 2));
+fs.writeFileSync(path.join(distDir, 'version_info.json'), JSON.stringify(wikiJsonData, null, 2));
+fs.copyFileSync(
+    path.join(projectRoot, 'scripts', 'update-wiki.js'),
+    path.join(distDir, 'update-wiki.js')
 );
 
 console.log('Build complete. version_info.json generated.');
