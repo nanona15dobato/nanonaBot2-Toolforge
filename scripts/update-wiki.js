@@ -3,7 +3,8 @@ const path = require('path');
 const { Mwn } = require('mwn');
 const username = process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME;
 const password = process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD;
-const userAgent = 'nanonaBot2-Deployer/1.0 (GitHub Actions)';
+const nnversion = '__FILE_HASH__';
+const userAgent = `nanonaBot2/update-wiki [${nnversion}] (Toolforge)`;
 const bot = new Mwn({
     apiUrl: 'https://meta.wikimedia.org/w/api.php',
     username,
