@@ -20,7 +20,7 @@ const jawpbot = new Mwn({
 });
 
 async function updateWiki() {
-    const jsonPath = path.join(__dirname, '..', 'version_info.json');
+    const jsonPath = path.join(__dirname, 'version_info.json');
     let jsonData;
     try {
         jsonData = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
