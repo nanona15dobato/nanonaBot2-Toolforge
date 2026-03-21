@@ -12,7 +12,6 @@ const bot = new Mwn({
     defaultParams: { format: 'json' }
 });
 
-
 (async () => {
     await checkTaskStatusAndExit(taskId);
     await bot.login();
