@@ -29,6 +29,7 @@ async function updateWiki() {
         process.exit(1);
     }
     await bot.login();
+    await jawpbot.login();
     const pageTitle = 'User:NanonaBot2/tasks.json';
     const pageData = await bot.read(pageTitle);
     const wikiContent = pageData?.revisions[0]?.content || '';
