@@ -186,11 +186,12 @@ async function getTargetPagesUsingTemplate(templates) {
         const response = await bot.request({
             action: 'query',
             meta: 'siteinfo',
-            siprop: 'general|namespaces|namespacealiases|interwikimap'
+            siprop: 'general|namespaces|namespacealiases|interwikimap',
+            formatversion: 2
         });
         const info = response.query;
         namespaceMap = info.namespaces;
-        
+
         parser.setSiteInfo(info);
         logger.success(taskId, 'ログイン成功');
         const TARGET_TEMPLATES = await getTemplatesInCategory();
@@ -212,7 +213,7 @@ async function getTargetPagesUsingTemplate(templates) {
                     const text = rev.content;
                     let newtext = text;
 
-                    if (!await allowBots(newtext, 'NanonaBot')) {
+                    if (!await allowBots(newtext, bot.options.username.split('@')[0])) {
                         Logcount.noEdit++;
                         return;
                     }
