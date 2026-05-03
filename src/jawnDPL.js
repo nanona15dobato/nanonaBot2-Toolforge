@@ -150,7 +150,8 @@ async function processCategory() {
                 }*/
                 try {
                     await bot.save(title, newText, "Bot: DynamicPageList→wikitext ([[phab:T421796]]).", { minor: true, bot: true });
-                    console.log(`Saved ${title} successfully.`);
+                     console.log(`Saved ${title} successfully.`);
+                     await new Promise(resolve => setTimeout(resolve, 5000));
                 } catch (e) {
                     console.error(`Failed to save ${title}:`, e.message);
                 }
