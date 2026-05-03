@@ -84,6 +84,10 @@ async function processCategory() {
                 console.error(`Failed to read ${title}:`, e.message);
                 continue;
             }
+            
+            //<DynamicPageList[^>]*>の前が改行でない場合は改行を追加する
+            const dplRegex = /(?<!\n)(<DynamicPageList[^>]*>)/gi;
+            text = text.replace(dplRegex, '\n$1');
 
             const matches = [...text.matchAll(dplPattern)];
             if (matches.length === 0) continue;
