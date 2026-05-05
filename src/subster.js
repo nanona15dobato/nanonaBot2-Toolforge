@@ -22,6 +22,21 @@ const parser = new WikitextParser();
 
 let namespaceMap = {};
 
+/**
+ * Yesno関数
+ * @param {any} val - 判定する引数
+ * @returns {boolean} - 判定結果 (true または false)
+ */
+function Yesno(val) {
+  if (val === undefined || val === '¬') return false;
+  const strVal = String(val);
+  if (strVal.trim() === '') return false;
+  const lowerVal = strVal.toLowerCase();
+  if (['no', 'n', 'false', '0'].includes(lowerVal)) return false;
+  if (['yes', 'y', 'true', '1'].includes(lowerVal)) return true;
+  return true;
+}
+
 // ==========================================
 // ページ名
 // ==========================================
@@ -224,6 +239,8 @@ async function getTargetPagesUsingTemplate(templates) {
                     for (const template of result.templates) {
                         let isMatch = TARGET_TEMPLATES.has(template.name);
                         if (isMatch && (template.type === 'template' || template.type === 'substTemplate')) {
+                            if(template.args && template.args.nosubst && Yesno(template.args.nosubst)) continue;
+                            if(template.args && template.args.demo && Yesno(template.args.demo)) continue;
                             matchedTemplates.push(template);
                         }
                     }
