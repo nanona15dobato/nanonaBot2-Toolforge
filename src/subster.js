@@ -77,7 +77,16 @@ async function getTemplatesInCategory() {
         if (!Number.isInteger(jawpconfig.subster['max transclusions']) || jawpconfig.subster['max transclusions'] < 1) {
             throw new Error('設定エラー: MAX_TRANSCLUSIONS は1以上の整数である必要があります。');
         }
-        nolimitSet = new Set(jawpconfig.Templates?.map(t => t.replace(/ /g, '_')) || []);
+        if (jawpconfig.Templates !== undefined) {
+            if (!Array.isArray(jawpconfig.Templates)) {
+                throw new Error('設定エラー: Templates は文字列の配列である必要があります。');
+            }
+            const invalidTemplateIndex = jawpconfig.Templates.findIndex(t => typeof t !== 'string');
+            if (invalidTemplateIndex !== -1) {
+                throw new Error(`設定エラー: Templates[${invalidTemplateIndex}] は文字列である必要があります。`);
+            }
+        }
+        nolimitSet = new Set((jawpconfig.Templates || []).map(t => t.replace(/ /g, '_')));
         nsPlaceholders = jawpconfig.subster.targetNamespace.map(() => '?').join(', ');
         queryParams = [jawpconfig.subster.targetCategory, ...jawpconfig.subster.targetNamespace, jawpconfig.subster['sql max']];
     } catch (error) {
