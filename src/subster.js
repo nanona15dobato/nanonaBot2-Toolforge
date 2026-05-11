@@ -71,13 +71,13 @@ async function getTemplatesInCategory() {
             jawpconfig.subster.targetCategory = jawpconfig.subster.targetCategory.replace(/ /g, '_');
         }
         if (!Array.isArray(jawpconfig.subster.targetNamespace) || jawpconfig.subster.targetNamespace.length === 0 || !jawpconfig.subster.targetNamespace.every(ns => Number.isInteger(ns) && ns >= 0)) {
-            throw new Error('設定エラー: TARGET_NAMESPACE は0以上の整数の配列である必要があります（例: [0, 1]）。');
+            throw new Error('設定エラー: jawpconfig.subster.targetNamespace は0以上の整数の配列である必要があります（例: [0, 1]）。');
         }
         if (!Number.isInteger(jawpconfig.subster['sql max']) || jawpconfig.subster['sql max'] < 1) {
-            throw new Error('設定エラー: SQL_MAX は1以上の整数である必要があります。');
+            throw new Error('設定エラー: jawpconfig.subster["sql max"] は1以上の整数である必要があります。');
         }
         if (!Number.isInteger(jawpconfig.subster['max transclusions']) || jawpconfig.subster['max transclusions'] < 1) {
-            throw new Error('設定エラー: MAX_TRANSCLUSIONS は1以上の整数である必要があります。');
+            throw new Error('設定エラー: jawpconfig.subster["max transclusions"] は1以上の整数である必要があります。');
         }
         if (jawpconfig.Templates !== undefined) {
             if (!Array.isArray(jawpconfig.Templates)) {
