@@ -21,6 +21,7 @@ const bot = new Mwn({
 const parser = new WikitextParser();
 
 let namespaceMap = {};
+let jawpconfig;
 
 /**
  * Yesno関数
@@ -55,20 +56,21 @@ async function getTemplatesInCategory() {
     let connection;
     let templates = [];
     let formattedRows = [];
-    let jawpconfig;
     let nolimitSet;
     let nsPlaceholders;
     let queryParams;
     try {
         const jawpconfig0 = await bot.read('利用者:NanonaBot2/w-ja-nn4/data.json');
-        jawpconfig = JSON.parse(jawpconfig0.query?.pages[0]?.revisions?.[0]?.content || '{}');
+        jawpconfig = JSON.parse(jawpconfig0.revisions?.[0]?.content || '{}');
         if (!jawpconfig || !jawpconfig.subster) {
             throw new Error('設定ファイルが見つかりませんでした');
         }
         if (typeof jawpconfig.subster.targetCategory !== 'string' || jawpconfig.subster.targetCategory.trim() === '') {
             throw new Error('設定エラー: TARGET_CATEGORY は空ではない文字列である必要があります。');
+        }else{
+            jawpconfig.subster.targetCategory = jawpconfig.subster.targetCategory.replace(/ /g, '_');
         }
-        if (!Array.isArray(jawpconfig.subster.targetNamespace) || !jawpconfig.subster.targetNamespace.every(ns => Number.isInteger(ns) && ns >= 0)) {
+        if (!Array.isArray(jawpconfig.subster.targetNamespace) || jawpconfig.subster.targetNamespace.length === 0 || !jawpconfig.subster.targetNamespace.every(ns => Number.isInteger(ns) && ns >= 0)) {
             throw new Error('設定エラー: TARGET_NAMESPACE は0以上の整数の配列である必要があります（例: [0, 1]）。');
         }
         if (!Number.isInteger(jawpconfig.subster['sql max']) || jawpconfig.subster['sql max'] < 1) {
@@ -203,7 +205,7 @@ async function getTargetPagesUsingTemplate(templates) {
                 action: 'query',
                 generator: 'embeddedin',
                 geititle: templateName,
-                geinamespace: '0|1',
+                geinamespace: jawpconfig.subster.targetNamespace.join('|'),
                 geilimit: 'max',
                 prop: 'info'
             })) {
