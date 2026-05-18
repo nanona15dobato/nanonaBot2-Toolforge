@@ -21,6 +21,7 @@ const bot = new Mwn({
 const parser = new WikitextParser();
 
 let namespaceMap = {};
+let jawpconfig;
 
 /**
  * Yesno関数
@@ -28,13 +29,13 @@ let namespaceMap = {};
  * @returns {boolean} - 判定結果 (true または false)
  */
 function Yesno(val) {
-  if (val === undefined || val === '¬') return false;
-  const strVal = String(val);
-  if (strVal.trim() === '') return false;
-  const lowerVal = strVal.toLowerCase();
-  if (['no', 'n', 'false', '0'].includes(lowerVal)) return false;
-  if (['yes', 'y', 'true', '1'].includes(lowerVal)) return true;
-  return true;
+    if (val === undefined || val === '¬') return false;
+    const strVal = String(val);
+    if (strVal.trim() === '') return false;
+    const lowerVal = strVal.toLowerCase();
+    if (['no', 'n', 'false', '0'].includes(lowerVal)) return false;
+    if (['yes', 'y', 'true', '1'].includes(lowerVal)) return true;
+    return true;
 }
 
 // ==========================================
@@ -55,6 +56,46 @@ async function getTemplatesInCategory() {
     let connection;
     let templates = [];
     let formattedRows = [];
+    let nolimitSet;
+    let nsPlaceholders;
+    let queryParams;
+    try {
+        const jawpconfig0 = await bot.read('利用者:NanonaBot2/w-ja-nn4/data.json');
+        jawpconfig = JSON.parse(jawpconfig0.revisions?.[0]?.content || '{}');
+        if (!jawpconfig || !jawpconfig.subster) {
+            throw new Error('設定ファイルが見つかりませんでした');
+        }
+        if (typeof jawpconfig.subster.targetCategory !== 'string' || jawpconfig.subster.targetCategory.trim() === '') {
+            throw new Error('設定エラー: TARGET_CATEGORY は空ではない文字列である必要があります。');
+        }else{
+            jawpconfig.subster.targetCategory = jawpconfig.subster.targetCategory.replace(/ /g, '_');
+        }
+        if (!Array.isArray(jawpconfig.subster.targetNamespace) || jawpconfig.subster.targetNamespace.length === 0 || !jawpconfig.subster.targetNamespace.every(ns => Number.isInteger(ns) && ns >= 0)) {
+            throw new Error('設定エラー: jawpconfig.subster.targetNamespace は0以上の整数の配列である必要があります（例: [0, 1]）。');
+        }
+        if (!Number.isInteger(jawpconfig.subster['sql max']) || jawpconfig.subster['sql max'] < 1) {
+            throw new Error('設定エラー: jawpconfig.subster["sql max"] は1以上の整数である必要があります。');
+        }
+        if (!Number.isInteger(jawpconfig.subster['max transclusions']) || jawpconfig.subster['max transclusions'] < 1) {
+            throw new Error('設定エラー: jawpconfig.subster["max transclusions"] は1以上の整数である必要があります。');
+        }
+        if (jawpconfig.Templates !== undefined) {
+            if (!Array.isArray(jawpconfig.Templates)) {
+                throw new Error('設定エラー: Templates は文字列の配列である必要があります。');
+            }
+            const invalidTemplateIndex = jawpconfig.Templates.findIndex(t => typeof t !== 'string');
+            if (invalidTemplateIndex !== -1) {
+                throw new Error(`設定エラー: Templates[${invalidTemplateIndex}] は文字列である必要があります。`);
+            }
+        }
+        nolimitSet = new Set((jawpconfig.Templates || []).map(t => t.replace(/ /g, '_')));
+        nsPlaceholders = jawpconfig.subster.targetNamespace.map(() => '?').join(', ');
+        queryParams = [jawpconfig.subster.targetCategory, ...jawpconfig.subster.targetNamespace, jawpconfig.subster['sql max']];
+    } catch (error) {
+        error.message = `設定ファイルの読み込みに失敗しました: ${error.message}`;
+        logger.error(taskId, error.message);
+        throw error;
+    }
 
     try {
         let config = {
@@ -112,9 +153,9 @@ async function getTemplatesInCategory() {
                     SELECT lt_id 
                     FROM linktarget 
                     WHERE lt_namespace = 14 
-                      AND lt_title = '自動的にsubst展開されるテンプレート'
+                      AND lt_title = ?
                 )
-                AND p2.page_namespace IN (0, 1)
+                AND p2.page_namespace IN (${nsPlaceholders})
                 AND NOT (
                     p2.page_namespace = p1.page_namespace AND p2.page_title = p1.page_title
                     OR p2.page_namespace = p1.page_namespace AND p2.page_title = CONCAT(p1.page_title, '/doc')
@@ -124,18 +165,18 @@ async function getTemplatesInCategory() {
                 p1.page_namespace, 
                 p1.page_title
             HAVING 
-                ct >= 1 AND ct <= 100
+                ct >= 1 AND ct <= ?
             ORDER BY
                 ct DESC;
         `;
 
-        const [rows] = await connection.execute(query);
+        const [rows] = await connection.execute(query, queryParams);
         formattedRows = rows.map(row => ({
             namespace: row.page_namespace,
             title: Buffer.isBuffer(row.page_title) ? row.page_title.toString('utf8') : String(row.page_title),
             count: row.ct
         }));
-        templates = new Set(formattedRows.map(row => getFullTitle(row.namespace, row.title)));
+        templates = new Set(formattedRows.filter(row => row.count <= jawpconfig.subster['max transclusions'] || nolimitSet.has(getFullTitle(row.namespace, row.title))).map(row => getFullTitle(row.namespace, row.title)));
 
     } catch (error) {
         logger.error(taskId, `Error fetching templates: ${error.message}`);
@@ -164,7 +205,7 @@ async function getTargetPagesUsingTemplate(templates) {
                 action: 'query',
                 generator: 'embeddedin',
                 geititle: templateName,
-                geinamespace: '0|1',
+                geinamespace: jawpconfig.subster.targetNamespace.join('|'),
                 geilimit: 'max',
                 prop: 'info'
             })) {
@@ -239,8 +280,8 @@ async function getTargetPagesUsingTemplate(templates) {
                     for (const template of result.templates) {
                         let isMatch = TARGET_TEMPLATES.has(template.name);
                         if (isMatch && (template.type === 'template' || template.type === 'substTemplate')) {
-                            if(template.args && template.args.nosubst && Yesno(template.args.nosubst)) continue;
-                            if(template.args && template.args.demo && Yesno(template.args.demo)) continue;
+                            if (template.args && template.args.nosubst && Yesno(template.args.nosubst)) continue;
+                            if (template.args && template.args.demo && Yesno(template.args.demo)) continue;
                             matchedTemplates.push(template);
                         }
                     }
