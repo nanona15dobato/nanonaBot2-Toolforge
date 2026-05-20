@@ -67,8 +67,8 @@ async function getTemplatesInCategory() {
         }
         if (typeof jawpconfig.subster.targetCategory !== 'string' || jawpconfig.subster.targetCategory.trim() === '') {
             throw new Error('設定エラー: TARGET_CATEGORY は空ではない文字列である必要があります。');
-        }else{
-            jawpconfig.subster.targetCategory = jawpconfig.subster.targetCategory.replace(/ /g, '_');
+        } else {
+            jawpconfig.subster.targetCategory = jawpconfig.subster.targetCategory.replace(/[ _]+/g, ' ');
         }
         if (!Array.isArray(jawpconfig.subster.targetNamespace) || jawpconfig.subster.targetNamespace.length === 0 || !jawpconfig.subster.targetNamespace.every(ns => Number.isInteger(ns) && ns >= 0)) {
             throw new Error('設定エラー: jawpconfig.subster.targetNamespace は0以上の整数の配列である必要があります（例: [0, 1]）。');
@@ -88,7 +88,7 @@ async function getTemplatesInCategory() {
                 throw new Error(`設定エラー: Templates[${invalidTemplateIndex}] は文字列である必要があります。`);
             }
         }
-        nolimitSet = new Set((jawpconfig.Templates || []).map(t => t.replace(/ /g, '_')));
+        nolimitSet = new Set((jawpconfig.Templates || []).map(t => t.replace(/[ _]+/g, ' ')));
         nsPlaceholders = jawpconfig.subster.targetNamespace.map(() => '?').join(', ');
         queryParams = [jawpconfig.subster.targetCategory, ...jawpconfig.subster.targetNamespace, jawpconfig.subster['sql max']];
     } catch (error) {
@@ -173,7 +173,7 @@ async function getTemplatesInCategory() {
         const [rows] = await connection.execute(query, queryParams);
         formattedRows = rows.map(row => ({
             namespace: row.page_namespace,
-            title: Buffer.isBuffer(row.page_title) ? row.page_title.toString('utf8') : String(row.page_title),
+            title: (Buffer.isBuffer(row.page_title) ? row.page_title.toString('utf8') : String(row.page_title)).replace(/[ _]+/g, ' '),
             count: row.ct
         }));
         templates = new Set(formattedRows.filter(row => row.count <= jawpconfig.subster['max transclusions'] || nolimitSet.has(getFullTitle(row.namespace, row.title))).map(row => getFullTitle(row.namespace, row.title)));
@@ -227,6 +227,35 @@ async function getTargetPagesUsingTemplate(templates) {
 }
 
 // ==========================================
+// リダイレクトを取得
+// ==========================================
+async function getRedirect(templates) {
+    try {
+        let redirects = new Set();
+        for await (let response of bot.continuedQueryGen({
+            action: 'query',
+            prop: 'redirects',
+            titles: Array.from(templates).join('|'),
+            formatversion: 2
+        })) {
+            const pages0 = Object.values(response?.query?.pages || {});
+
+            pages0.forEach(page => {
+                if (!page.redirects) return;
+                page.redirects.forEach(redirect => {
+                    redirects.add(redirect.title);
+                });
+            });
+        }
+        return redirects;
+    } catch (error) {
+        logger.error(taskId, `Error fetching redirects: ${error.message}`);
+        error.message = `リダイレクトの取得に失敗しました: ${error.message}`;
+        throw error;
+    }
+}
+
+// ==========================================
 // メイン処理
 // ==========================================
 (async () => {
@@ -251,12 +280,12 @@ async function getTargetPagesUsingTemplate(templates) {
         parser.setSiteInfo(info);
         logger.success(taskId, 'ログイン成功');
         const TARGET_TEMPLATES = await getTemplatesInCategory();
-        console.log(TARGET_TEMPLATES);
         if (TARGET_TEMPLATES.size === 0) {
             return;
         }
         const targetPages = await getTargetPagesUsingTemplate(TARGET_TEMPLATES);
-        console.log(targetPages);
+        const reTemplates = await getRedirect(TARGET_TEMPLATES);
+        reTemplates.forEach(t => TARGET_TEMPLATES.add(t));
         if (targetPages.size === 0) {
             logger.error(taskId, `SQLではマッチしましたが、対象ページが見つかりませんでした。`, true);
             return;
@@ -276,6 +305,7 @@ async function getTargetPagesUsingTemplate(templates) {
 
                     const result = parser.parse(text, { templates: true });
                     let matchedTemplates = [];
+                    let substedTemplates = new Set();
 
                     for (const template of result.templates) {
                         let isMatch = TARGET_TEMPLATES.has(template.name);
@@ -283,6 +313,7 @@ async function getTargetPagesUsingTemplate(templates) {
                             if (template.args && template.args.nosubst && Yesno(template.args.nosubst)) continue;
                             if (template.args && template.args.demo && Yesno(template.args.demo)) continue;
                             matchedTemplates.push(template);
+                            substedTemplates.add(template.name);
                         }
                     }
 
@@ -355,9 +386,11 @@ async function getTargetPagesUsingTemplate(templates) {
                         Logcount.noEdit++;
                         return;
                     }
+                    const summary = `Bot:自動subst展開 (${Array.from(substedTemplates)
+                        .map(t => t.startsWith('Template:') ? `[[${t}|${t.replace(/^Template:/, '')}]]` : `[[:${t}]]`).join(', ')})`;
                     return {
                         text: newtext,
-                        summary: 'Bot:自動subst展開',
+                        summary: summary,
                         bot: true,
                         minor: true
                     }
