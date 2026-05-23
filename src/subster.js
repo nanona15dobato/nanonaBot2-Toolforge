@@ -55,6 +55,7 @@ async function getTemplatesInCategory() {
 
     let connection;
     let templates = [];
+    let excludedTemplates = [];
     let formattedRows = [];
     let nolimitSet;
     let nsPlaceholders;
@@ -176,7 +177,21 @@ async function getTemplatesInCategory() {
             title: (Buffer.isBuffer(row.page_title) ? row.page_title.toString('utf8') : String(row.page_title)).replace(/[ _]+/g, ' '),
             count: row.ct
         }));
-        templates = new Set(formattedRows.filter(row => row.count <= jawpconfig.subster['max transclusions'] || nolimitSet.has(getFullTitle(row.namespace, row.title))).map(row => getFullTitle(row.namespace, row.title)));
+
+        const maxTransclusions = jawpconfig.subster['max transclusions'];
+        const includedTemplates = [];
+        excludedTemplates = [];
+
+        for (const row of formattedRows) {
+            const fullTitle = getFullTitle(row.namespace, row.title);
+            if (row.count <= maxTransclusions || nolimitSet.has(fullTitle)) {
+                includedTemplates.push(fullTitle);
+            } else {
+                excludedTemplates.push(fullTitle);
+            }
+        }
+
+        templates = new Set(includedTemplates);
 
     } catch (error) {
         logger.error(taskId, `Error fetching templates: ${error.message}`);
@@ -187,7 +202,7 @@ async function getTemplatesInCategory() {
             await connection.end();
         }
     }
-    return templates;
+    return { templates, excludedTemplates };
 }
 
 // ==========================================
@@ -263,7 +278,12 @@ async function getRedirect(templates) {
     let Logcount = {
         success: 0,
         failed: 0,
-        noEdit: 0
+        noEdit: 0,
+        skips: {
+            allowBots: [],
+            noTargetTemplate: [],
+            nochange: []
+        }
     }
     try {
         await checkTaskStatusAndExit(taskId);
@@ -279,7 +299,12 @@ async function getRedirect(templates) {
 
         parser.setSiteInfo(info);
         logger.success(taskId, 'ログイン成功');
-        const TARGET_TEMPLATES = await getTemplatesInCategory();
+        const { templates: TARGET_TEMPLATES, excludedTemplates: EXCLUDED_TEMPLATES } = await getTemplatesInCategory();
+        if (EXCLUDED_TEMPLATES.length > 0) {
+            logger.info(taskId, `[SKIP] 除外テンプレート: ${EXCLUDED_TEMPLATES.join(', ')}`, true);
+        } else {
+            logger.info(taskId, '[SKIP] 除外テンプレートなし');
+        }
         if (TARGET_TEMPLATES.size === 0) {
             return;
         }
@@ -300,6 +325,7 @@ async function getRedirect(templates) {
 
                     if (!await allowBots(newtext, bot.options.username.split('@')[0])) {
                         Logcount.noEdit++;
+                        Logcount.skips.allowBots.push(title);
                         return;
                     }
 
@@ -319,6 +345,7 @@ async function getRedirect(templates) {
 
                     if (matchedTemplates.length === 0) {
                         Logcount.noEdit++;
+                        Logcount.skips.noTargetTemplate.push(title);
                         return;
                     }
 
@@ -384,6 +411,7 @@ async function getRedirect(templates) {
                     }
                     if (newtext === text) {
                         Logcount.noEdit++;
+                        Logcount.skips.nochange.push(title);
                         return;
                     }
                     const summary = `Bot:自動subst展開 (${Array.from(substedTemplates)
@@ -404,6 +432,17 @@ async function getRedirect(templates) {
                 Logcount.failed++;
             }
         }
+        let skiplogs = Logcount.skips;
+        if (skiplogs.allowBots.length > 0) {
+            logger.info(taskId, `[SKIP] allowBots:${skiplogs.allowBots.join(', ')}`, true);
+        }
+        if (skiplogs.noTargetTemplate.length > 0) {
+            logger.info(taskId, `[SKIP] noTargetTemplate:${skiplogs.noTargetTemplate.join(', ')}`, true);
+        }
+        if (skiplogs.nochange.length > 0) {
+            logger.info(taskId, `[SKIP] nochange:${skiplogs.nochange.join(', ')}`, true);
+        }
+        logger.info(taskId, `Subst展開処理終了。`, false, Logcount);
         if (Logcount.failed > 0) {
             logger.error(taskId, `Subst展開処理完了。成功: ${Logcount.success} 件、失敗: ${Logcount.failed} 件、編集なし: ${Logcount.noEdit} 件。`, true);
         } else {
