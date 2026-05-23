@@ -55,7 +55,7 @@ async function getTemplatesInCategory() {
 
     let connection;
     let templates = [];
-    let mtemplates = [];
+    let excludedTemplates = [];
     let formattedRows = [];
     let nolimitSet;
     let nsPlaceholders;
@@ -180,14 +180,14 @@ async function getTemplatesInCategory() {
 
         const maxTransclusions = jawpconfig.subster['max transclusions'];
         const includedTemplates = [];
-        mtemplates = [];
+        excludedTemplates = [];
 
         for (const row of formattedRows) {
             const fullTitle = getFullTitle(row.namespace, row.title);
             if (row.count <= maxTransclusions || nolimitSet.has(fullTitle)) {
                 includedTemplates.push(fullTitle);
             } else {
-                mtemplates.push(fullTitle);
+                excludedTemplates.push(fullTitle);
             }
         }
 
@@ -202,7 +202,7 @@ async function getTemplatesInCategory() {
             await connection.end();
         }
     }
-    return { templates, mtemplates };
+    return { templates, excludedTemplates };
 }
 
 // ==========================================
@@ -280,7 +280,6 @@ async function getRedirect(templates) {
         failed: 0,
         noEdit: 0,
         skips: {
-            maxTransclusions: [],
             allowBots: [],
             noTargetTemplate: [],
             nochange: []
@@ -300,7 +299,7 @@ async function getRedirect(templates) {
 
         parser.setSiteInfo(info);
         logger.success(taskId, 'ログイン成功');
-        const { templates: TARGET_TEMPLATES, mtemplates: EXCLUDED_TEMPLATES } = await getTemplatesInCategory();
+        const { templates: TARGET_TEMPLATES, excludedTemplates: EXCLUDED_TEMPLATES } = await getTemplatesInCategory();
         if (EXCLUDED_TEMPLATES.length > 0) {
             logger.info(taskId, `[SKIP] 除外テンプレート: ${EXCLUDED_TEMPLATES.join(', ')}`, true);
         } else {
@@ -434,14 +433,14 @@ async function getRedirect(templates) {
             }
         }
         let skiplogs = Logcount.skips;
-        if (skiplogs.maxTransclusions.length > 0) {
-            logger.info(taskId, `[SKIP] maxTransclusions:${skiplogs.maxTransclusions.join(', ')}`, true);
-        }
         if (skiplogs.allowBots.length > 0) {
             logger.info(taskId, `[SKIP] allowBots:${skiplogs.allowBots.join(', ')}`, true);
         }
         if (skiplogs.noTargetTemplate.length > 0) {
             logger.info(taskId, `[SKIP] noTargetTemplate:${skiplogs.noTargetTemplate.join(', ')}`, true);
+        }
+        if (skiplogs.nochange.length > 0) {
+            logger.info(taskId, `[SKIP] nochange:${skiplogs.nochange.join(', ')}`, true);
         }
         logger.info(taskId, `Subst展開処理終了。`, false, Logcount);
         if (Logcount.failed > 0) {
