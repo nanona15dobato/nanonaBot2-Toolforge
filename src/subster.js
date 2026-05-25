@@ -445,8 +445,24 @@ async function getRedirect(templates) {
         if (skiplogs.nochange.length > 0) {
             logger.info(taskId, `[SKIP] nochange:${skiplogs.nochange.join(', ')}`, true);
         }
-        for (const key in Logcount.skips) { Logcount.skips[key].sort(); }
-        if (jawpconfig.skips !== Logcount.skips) {
+        for (const key of Object.keys(Logcount.skips)) {
+            Logcount.skips[key].sort();
+        }
+
+        const prevSkips = jawpconfig.skips || {};
+        const allKeys = new Set([...Object.keys(prevSkips), ...Object.keys(Logcount.skips)]);
+        const skipsChanged = [...allKeys].some((k) => {
+            const a = prevSkips[k];
+            const b = Logcount.skips[k];
+            if (!Array.isArray(a) || !Array.isArray(b)) return true;
+            if (a.length !== b.length) return true;
+            for (let i = 0; i < a.length; i++) {
+                if (a[i] !== b[i]) return true;
+            }
+            return false;
+        });
+
+        if (skipsChanged) {
             jawpconfig.skips = Logcount.skips;
             await bot.save(configPage, JSON.stringify(jawpconfig, null, 2), 'Bot: 編集除外対象更新');
         }
