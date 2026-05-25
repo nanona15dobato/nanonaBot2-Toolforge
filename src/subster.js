@@ -22,6 +22,7 @@ const parser = new WikitextParser();
 
 let namespaceMap = {};
 let jawpconfig;
+const configPage = '利用者:NanonaBot2/w-ja-nn4/data.json';
 
 /**
  * Yesno関数
@@ -61,7 +62,7 @@ async function getTemplatesInCategory() {
     let nsPlaceholders;
     let queryParams;
     try {
-        const jawpconfig0 = await bot.read('利用者:NanonaBot2/w-ja-nn4/data.json');
+        const jawpconfig0 = await bot.read(configPage);
         jawpconfig = JSON.parse(jawpconfig0.revisions?.[0]?.content || '{}');
         if (!jawpconfig || !jawpconfig.subster) {
             throw new Error('設定ファイルが見つかりませんでした');
@@ -280,7 +281,8 @@ async function getRedirect(templates) {
         failed: 0,
         noEdit: 0,
         skips: {
-            allowBots: [],
+            excludedTemplates: [],
+            nobots: [],
             noTargetTemplate: [],
             nochange: []
         }
@@ -300,8 +302,9 @@ async function getRedirect(templates) {
         parser.setSiteInfo(info);
         logger.success(taskId, 'ログイン成功');
         const { templates: TARGET_TEMPLATES, excludedTemplates: EXCLUDED_TEMPLATES } = await getTemplatesInCategory();
+        Logcount.skips.excludedTemplates = EXCLUDED_TEMPLATES;
         if (EXCLUDED_TEMPLATES.length > 0) {
-            logger.info(taskId, `[SKIP] 除外テンプレート: ${EXCLUDED_TEMPLATES.join(', ')}`, true);
+            logger.info(taskId, `[SKIP] 参照呼び出し数オーバー: ${EXCLUDED_TEMPLATES.join(', ')}`, true);
         } else {
             logger.info(taskId, '[SKIP] 除外テンプレートなし');
         }
@@ -325,7 +328,7 @@ async function getRedirect(templates) {
 
                     if (!await allowBots(newtext, bot.options.username.split('@')[0])) {
                         Logcount.noEdit++;
-                        Logcount.skips.allowBots.push(title);
+                        Logcount.skips.nobots.push(title);
                         return;
                     }
 
@@ -433,14 +436,19 @@ async function getRedirect(templates) {
             }
         }
         let skiplogs = Logcount.skips;
-        if (skiplogs.allowBots.length > 0) {
-            logger.info(taskId, `[SKIP] allowBots:${skiplogs.allowBots.join(', ')}`, true);
+        if (skiplogs.nobots.length > 0) {
+            logger.info(taskId, `[SKIP] {{nobots}}指定:${skiplogs.nobots.join(', ')}`, true);
         }
         if (skiplogs.noTargetTemplate.length > 0) {
             logger.info(taskId, `[SKIP] noTargetTemplate:${skiplogs.noTargetTemplate.join(', ')}`, true);
         }
         if (skiplogs.nochange.length > 0) {
             logger.info(taskId, `[SKIP] nochange:${skiplogs.nochange.join(', ')}`, true);
+        }
+        for (const key in Logcount.skips) { Logcount.skips[key].sort(); }
+        if (jawpconfig.skips !== Logcount.skips) {
+            jawpconfig.skips = Logcount.skips;
+            await bot.save(configPage, JSON.stringify(jawpconfig, null, 2), 'Bot: 編集除外対象更新');
         }
         logger.info(taskId, `Subst展開処理終了。`, false, Logcount);
         if (Logcount.failed > 0) {
