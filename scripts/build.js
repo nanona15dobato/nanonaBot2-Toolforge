@@ -92,5 +92,9 @@ fs.copyFileSync(
     path.join(projectRoot, 'scripts', 'update-wiki.js'),
     path.join(distDir, 'update-wiki.js')
 );
+fs.copyFileSync(
+    path.join(projectRoot, 'scripts', 'archive-logs.js'),
+    path.join(distDir, 'archive-logs.js')
+);
 
 console.log('Build complete. version_info.json generated.');
