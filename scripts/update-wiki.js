@@ -33,7 +33,7 @@ async function updateWiki() {
     await jawpbot.login();
     const pageTitle = 'User:NanonaBot2/tasks.json';
     const pageData = await bot.read(pageTitle);
-    const wikiContent = pageData?.revisions[0]?.content || '';
+    const wikiContent = pageData?.revisions?.[0]?.content || '';
     const wikijson = JSON.parse(wikiContent || '{}');
 
     wikijson['NanonaBot2'] = {
@@ -42,8 +42,10 @@ async function updateWiki() {
     };
     Object.keys(jsonData.files || {}).forEach(taskId => {
         const fileInfo = jsonData.files[taskId];
-        wikijson[taskId]['version'] = fileInfo.hash || wikijson[taskId]?.version || '0.0.0';
-        wikijson[taskId]['lastupdate'] = fileInfo.last_updated || wikijson[taskId]?.lastupdate || new Date().toISOString();
+        const taskInfo = wikijson[taskId] || {};
+        taskInfo.version = fileInfo.hash || taskInfo.version || '0.0.0';
+        taskInfo.lastupdate = fileInfo.last_updated || taskInfo.lastupdate || new Date().toISOString();
+        wikijson[taskId] = taskInfo;
     });
 
     try {
@@ -56,4 +58,7 @@ async function updateWiki() {
     }
 }
 
-updateWiki();
+updateWiki().catch(error => {
+    console.error('Wiki update failed:', error);
+    process.exitCode = 1;
+});
