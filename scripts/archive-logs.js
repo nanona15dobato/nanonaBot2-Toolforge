@@ -20,6 +20,7 @@ class LogArchiver {
         this.privateLogFile = path.join(this.logsDir, "private.jsonl");
         this.publicArchiveDir = path.join(this.logsDir, "public-archive");
         this.privateArchiveDir = path.join(this.logsDir, "private-archive");
+        this.logLockDir = path.join(this.logsDir, ".archive.lock");
         
         // ディレクトリの作成
         this.ensureDirectoryExists(this.publicArchiveDir);
@@ -46,9 +47,16 @@ class LogArchiver {
      * 年月文字列を生成（YYYY-MM形式）
      */
     getYearMonthString(date = new Date()) {
-        const year = date.getFullYear();
-        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const year = date.getUTCFullYear();
+        const month = String(date.getUTCMonth() + 1).padStart(2, '0');
         return `${year}-${month}`;
+    }
+
+    getUtcDateDaysAgo(days) {
+        const date = new Date();
+        date.setUTCHours(0, 0, 0, 0);
+        date.setUTCDate(date.getUTCDate() - days);
+        return this.getDateString(date);
     }
 
     /**
@@ -88,11 +96,19 @@ class LogArchiver {
      * ログをファイルに書き込み
      */
     writeLogFile(filePath, logs) {
+        const temporaryPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
         try {
             const content = logs.map(log => JSON.stringify(log)).join("\n") + "\n";
-            fs.writeFileSync(filePath, content);
+            fs.writeFileSync(temporaryPath, content);
+            if (process.platform === "win32" && fs.existsSync(filePath)) {
+                fs.rmSync(filePath);
+            }
+            fs.renameSync(temporaryPath, filePath);
             return true;
         } catch (error) {
+            if (fs.existsSync(temporaryPath)) {
+                fs.unlinkSync(temporaryPath);
+            }
             console.error(`ログファイル書き込みエラー (${filePath}):`, error);
             return false;
         }
@@ -103,8 +119,17 @@ class LogArchiver {
      */
     appendLogFile(filePath, logs) {
         try {
-            const content = logs.map(log => JSON.stringify(log)).join("\n") + "\n";
-            fs.appendFileSync(filePath, content);
+            const existingLines = fs.existsSync(filePath)
+                ? fs.readFileSync(filePath, "utf8").split("\n").filter(line => line)
+                : [];
+            const existing = new Set(existingLines);
+            const newLines = logs
+                .map(log => JSON.stringify(log))
+                .filter(line => !existing.has(line));
+
+            if (newLines.length > 0) {
+                fs.appendFileSync(filePath, `${newLines.join("\n")}\n`);
+            }
             return true;
         } catch (error) {
             console.error(`ログファイル追加エラー (${filePath}):`, error);
@@ -156,12 +181,20 @@ class LogArchiver {
 
         // 日付別にアーカイブファイルに保存
         let archivedCount = 0;
+        let archiveSucceeded = true;
         Object.keys(logsByDate).forEach(date => {
             const archiveFile = path.join(this.publicArchiveDir, `${date}.jsonl`);
             if (this.appendLogFile(archiveFile, logsByDate[date])) {
                 archivedCount += logsByDate[date].length;
+            } else {
+                archiveSucceeded = false;
             }
         });
+
+        if (!archiveSucceeded || archivedCount !== oldLogs.length) {
+            console.error("公開ログのアーカイブに失敗したため、元ログを保持します。");
+            return false;
+        }
 
         // 元のログファイルを直近一週間のみに更新
         if (this.writeLogFile(this.publicLogFile, recentLogs)) {
@@ -183,8 +216,7 @@ class LogArchiver {
             const archiveFiles = fs.readdirSync(this.publicArchiveDir)
                 .filter(file => file.endsWith(".jsonl"));
 
-            const twoWeeksAgo = new Date();
-            twoWeeksAgo.setDate(twoWeeksAgo.getDate() - 14); // 2週間前
+            const twoWeeksAgo = this.getUtcDateDaysAgo(14);
 
             let movedCount = 0;
 
@@ -193,7 +225,7 @@ class LogArchiver {
                 const fileDate = new Date(dateStr + 'T00:00:00.000Z');
 
                 // 2週間より古い公開過去ログを非公開に移動
-                if (fileDate < twoWeeksAgo) {
+                if (dateStr < twoWeeksAgo) {
                     const publicArchivePath = path.join(this.publicArchiveDir, file);
                     
                     try {
@@ -275,7 +307,7 @@ class LogArchiver {
             const logsByYearMonth = {};
             logs.forEach(log => {
                 const logDate = new Date(log.timestamp);
-                const year = logDate.getFullYear();
+                const year = logDate.getUTCFullYear();
                 const yearMonth = this.getYearMonthString(logDate);
                 
                 if (!logsByYearMonth[year]) {
@@ -289,6 +321,7 @@ class LogArchiver {
 
             // 年月別にファイルに保存
             let totalArchived = 0;
+            let archiveSucceeded = true;
             Object.keys(logsByYearMonth).forEach(year => {
                 const yearDir = this.getPrivateArchiveYearDir(year);
                 this.ensureDirectoryExists(yearDir);
@@ -300,12 +333,14 @@ class LogArchiver {
                     if (this.appendLogFile(monthFile, monthLogs)) {
                         totalArchived += monthLogs.length;
                         console.log(`${year}/${yearMonth}: ${monthLogs.length}件をアーカイブ`);
+                    } else {
+                        archiveSucceeded = false;
                     }
                 });
             });
 
             console.log(`合計 ${totalArchived}件のログを年月別アーカイブに保存しました。`);
-            return totalArchived === logs.length;
+            return archiveSucceeded && totalArchived === logs.length;
         } catch (error) {
             console.error("非公開アーカイブ保存エラー:", error);
             return false;
@@ -318,19 +353,44 @@ class LogArchiver {
     run() {
         console.log(`=== nanonaBot2 ログアーカイブ処理開始 (${new Date().toISOString()}) ===`);
 
-        const results = [
-            this.archivePublicLogs(),        // 公開ログ → 公開過去ログ (1週間経過)
-            this.archiveOldPublicLogs(),     // 公開過去ログ → 非公開過去ログ (2週間経過) 
-            this.archivePrivateLogs()        // 非公開ログ → 非公開日付ログ (1週間経過)
-        ];
+        let lockAcquired = false;
+        try {
+            const lockStart = Date.now();
+            while (!lockAcquired) {
+                try {
+                    fs.mkdirSync(this.logLockDir);
+                    lockAcquired = true;
+                } catch (error) {
+                    if (Date.now() - lockStart >= 30000) {
+                        throw new Error("ログロックを取得できませんでした");
+                    }
+                    const lockInfo = fs.statSync(this.logLockDir);
+                    if (Date.now() - lockInfo.mtimeMs > 600000) {
+                        fs.rmSync(this.logLockDir, { recursive: true, force: true });
+                    } else {
+                        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+                    }
+                }
+            }
 
-        const success = results.every(result => result);
-        
-        if (success) {
-            console.log("=== ログアーカイブ処理が正常に完了しました ===");
-        } else {
-            console.error("=== ログアーカイブ処理中にエラーが発生しました ===");
-            process.exit(1);
+            const results = [
+                this.archivePublicLogs(),
+                this.archiveOldPublicLogs(),
+                this.archivePrivateLogs()
+            ];
+
+            if (results.every(result => result)) {
+                console.log("=== ログアーカイブ処理が正常に完了しました ===");
+            } else {
+                throw new Error("ログアーカイブ処理中にエラーが発生しました");
+            }
+        } catch (error) {
+            console.error(error.message);
+            process.exitCode = 1;
+        } finally {
+            if (lockAcquired) {
+                fs.rmSync(this.logLockDir, { recursive: true, force: true });
+            }
         }
     }
 }

@@ -12,6 +12,7 @@ class BotLogger {
         this.publicLogFile = path.join(this.logsDir, "public.jsonl");
         this.privateLogFile = path.join(this.logsDir, "private.jsonl");
         this.publicArchiveDir = path.join(this.logsDir, "public-archive");
+        this.logLockDir = path.join(this.logsDir, ".archive.lock");
 
         // ディレクトリの作成
         this.ensureDirectoryExists(this.logsDir);
@@ -51,7 +52,10 @@ class BotLogger {
 
         const logLine = JSON.stringify(logEntry) + "\n";
 
+        let lockAcquired = false;
         try {
+            this.acquireLogLock();
+            lockAcquired = true;
             // 常に非公開ログに保存
             fs.appendFileSync(this.privateLogFile, logLine);
 
@@ -65,7 +69,35 @@ class BotLogger {
         } catch (error) {
             console.error("ログ保存エラー:", error);
             return false;
+        } finally {
+            if (lockAcquired) {
+                this.releaseLogLock();
+            }
         }
+    }
+
+    acquireLogLock() {
+        const lockStart = Date.now();
+        while (true) {
+            try {
+                fs.mkdirSync(this.logLockDir);
+                return;
+            } catch (error) {
+                if (Date.now() - lockStart >= 30000) {
+                    throw new Error("ログロックを取得できませんでした");
+                }
+                const lockInfo = fs.statSync(this.logLockDir);
+                if (Date.now() - lockInfo.mtimeMs > 600000) {
+                    fs.rmSync(this.logLockDir, { recursive: true, force: true });
+                } else {
+                    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+                }
+            }
+        }
+    }
+
+    releaseLogLock() {
+        fs.rmSync(this.logLockDir, { recursive: true, force: true });
     }
 
     /**
