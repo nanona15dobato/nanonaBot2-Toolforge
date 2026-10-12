@@ -123,9 +123,9 @@ async function cleanstart() {
         if (logs.error.length > 0) {
             logger.error(taskId, logMessage, true);
         } else if (logs.success.length > 0) {
-            logger.success(taskId, logMessage);
+            logger.success(taskId, logMessage, true);
         } else {
-            logger.info(taskId, logMessage);
+            logger.info(taskId, logMessage, true);
         }
     }
 }
