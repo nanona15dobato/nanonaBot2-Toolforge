@@ -111,6 +111,8 @@ async function updateTaskStatus(data) {
         console.error('タスク状態の更新に失敗しました:', re);
         return;
     }
+    // data/ はデプロイ対象外のため、初回は存在しない
+    fs.mkdirSync(path.dirname(lastDataPath), { recursive: true });
     fs.writeFileSync(lastDataPath, JSON.stringify(data, null, 2), 'utf-8');
     console.log('タスク状態の更新が完了しました。');
 }

@@ -17,6 +17,7 @@ const overallVersion = pkg.version;
 
 const versionList = {};
 const declaredTaskIds = {};
+const duplicateTaskIdErrors = [];
 
 function collectJsFiles(dir, results = []) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -67,6 +68,9 @@ files.forEach(srcPath => {
     const idMatch = content.match(/const\s+taskId\s*=\s*['"]([^'"]+)['"]/);
     if (idMatch) {
         const taskId = idMatch[1];
+        if (declaredTaskIds[taskId]) {
+            duplicateTaskIdErrors.push(`${taskId}: src/${declaredTaskIds[taskId]} と src/${relPath} で重複して宣言されています`);
+        }
         declaredTaskIds[taskId] = relPath;
         const lastUpdated = getFileLastModified(srcPath);
 
@@ -80,7 +84,10 @@ files.forEach(srcPath => {
 
 // タスク台帳の検証
 const registry = loadRegistry();
-const registryErrors = validateRegistry(registry, { srcDir, declaredTaskIds });
+const registryErrors = [
+    ...duplicateTaskIdErrors,
+    ...validateRegistry(registry, { srcDir, declaredTaskIds })
+];
 if (registryErrors.length) {
     console.error('tasks.json に問題があります:');
     registryErrors.forEach(e => console.error(`- ${e}`));

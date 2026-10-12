@@ -14,9 +14,37 @@ const registryPath = path.join(__dirname, '..', 'tasks.json');
 const STATUSES = ['active', 'retired'];
 const WEEKDAYS = ['日', '月', '火', '水', '木', '金', '土'];
 const JST_OFFSET = 9;
+// cronの各フィールドの範囲（分 時 日 月 曜日。曜日は7も日曜として許容）
+const CRON_RANGES = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
 
 function loadRegistry(filePath = registryPath) {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+/**
+ * cron式（5フィールド、数値のみ）の書式と範囲を検証する
+ * 各フィールドは * / 数値 / a-b / a,b / （*またはa-b）/n に対応
+ * @param {string} schedule
+ * @returns {string|null} 問題があれば理由、なければ null
+ */
+function validateCron(schedule) {
+    const fields = String(schedule ?? '').trim().split(/\s+/);
+    if (fields.length !== 5) return '5フィールドではありません';
+
+    for (let i = 0; i < 5; i++) {
+        const [lo, hi] = CRON_RANGES[i];
+        for (const part of fields[i].split(',')) {
+            const match = part.match(/^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/);
+            if (!match) return `"${fields[i]}" を解釈できません`;
+            const [, , start, end, step] = match;
+            if (step !== undefined && Number(step) < 1) return `"${part}" の間隔が不正です`;
+            if (start === undefined) continue;
+            const a = Number(start);
+            const b = end === undefined ? a : Number(end);
+            if (a < lo || b > hi || a > b) return `"${part}" が範囲 ${lo}-${hi} の外です`;
+        }
+    }
+    return null;
 }
 
 /**
@@ -34,8 +62,8 @@ function formatJstTime(hour, minute) {
  * @returns {string|null}
  */
 function cronToJst(schedule) {
+    if (validateCron(schedule)) return null;
     const fields = String(schedule).trim().split(/\s+/);
-    if (fields.length !== 5) return null;
     const [min, hour, dom, month, dow] = fields;
     const isNum = v => /^\d+$/.test(v);
 
@@ -110,7 +138,9 @@ function validateRegistry(registry, { srcDir, declaredTaskIds } = {}) {
                 errors.push(`${id}: job には name と schedule が必要です`);
             } else {
                 checkJobName(task.job.name, id);
-                if (!task.execTime && !cronToJst(task.job.schedule)) {
+                const cronError = validateCron(task.job.schedule);
+                if (cronError) errors.push(`${id}: schedule "${task.job.schedule}" が不正です（${cronError}）`);
+                if (!cronError && !task.execTime && !cronToJst(task.job.schedule)) {
                     errors.push(`${id}: schedule "${task.job.schedule}" から実行間隔を作れないため execTime を書いてください`);
                 }
             }
@@ -119,7 +149,12 @@ function validateRegistry(registry, { srcDir, declaredTaskIds } = {}) {
 
     for (const [name, job] of Object.entries(registry.jobs || {})) {
         checkJobName(name, `jobs.${name}`);
-        if (!job.command || !job.schedule) errors.push(`jobs.${name}: command と schedule が必要です`);
+        if (!job.command || !job.schedule) {
+            errors.push(`jobs.${name}: command と schedule が必要です`);
+        } else {
+            const cronError = validateCron(job.schedule);
+            if (cronError) errors.push(`jobs.${name}: schedule "${job.schedule}" が不正です（${cronError}）`);
+        }
     }
 
     if (declaredTaskIds) {
@@ -156,7 +191,11 @@ function buildJobList(registry) {
 
     return jobs
         .sort((a, b) => a.name.localeCompare(b.name))
-        .map(job => ({ ...job, filelog: `${logDir}/${job.name}.out` }));
+        .map(job => ({
+            ...job,
+            filelogStdout: `${logDir}/${job.name}.out`,
+            filelogStderr: `${logDir}/${job.name}.err`
+        }));
 }
 
 function toJobsYaml(registry) {
@@ -169,7 +208,8 @@ function toJobsYaml(registry) {
         lines.push(`  image: ${JSON.stringify(job.image)}`);
         lines.push(`  name: ${JSON.stringify(job.name)}`);
         lines.push(`  schedule: ${JSON.stringify(job.schedule)}`);
-        lines.push(`  filelog: ${JSON.stringify(job.filelog)}`);
+        lines.push(`  filelog-stdout: ${JSON.stringify(job.filelogStdout)}`);
+        lines.push(`  filelog-stderr: ${JSON.stringify(job.filelogStderr)}`);
     }
     return lines.join('\n') + '\n';
 }
@@ -220,6 +260,7 @@ module.exports = {
     registryPath,
     loadRegistry,
     cronToJst,
+    validateCron,
     validateRegistry,
     buildJobList,
     toJobsYaml,
