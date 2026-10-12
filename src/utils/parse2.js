@@ -62,18 +62,30 @@ class WikitextParser {
         return id;
     }
 
-    // マスク内のマスクも再帰的に展開する(展開結果はキャッシュ)
+    // マスク内のマスクも展開する(展開結果はキャッシュ)
     unmask(text) {
         if (typeof text !== 'string') return text;
-        return text.replace(/\x01[A-Z_]+_\d+\x02/g, (id) => {
-            if (!this.masks.has(id)) return id;
-            let cached = this.unmaskCache.get(id);
-            if (cached === undefined) {
-                cached = this.unmask(this.masks.get(id));
-                this.unmaskCache.set(id, cached);
+        return text.replace(/\x01[A-Z_]+_\d+\x02/g, (id) => this.masks.has(id) ? this.unmaskId(id) : id);
+    }
+
+    // 深い入れ子でもコールスタックを使わないよう、明示的なスタックで内側から展開する
+    unmaskId(rootId) {
+        if (this.unmaskCache.has(rootId)) return this.unmaskCache.get(rootId);
+        const maskRegex = /\x01[A-Z_]+_\d+\x02/g;
+        const stack = [rootId];
+        while (stack.length > 0) {
+            const id = stack[stack.length - 1];
+            if (this.unmaskCache.has(id)) { stack.pop(); continue; }
+            const content = this.masks.get(id);
+            const pending = (content.match(maskRegex) || []).filter(child => this.masks.has(child) && !this.unmaskCache.has(child));
+            if (pending.length > 0) {
+                for (const child of pending) stack.push(child);
+                continue;
             }
-            return cached;
-        });
+            this.unmaskCache.set(id, content.replace(maskRegex, child => this.masks.has(child) ? this.unmaskCache.get(child) : child));
+            stack.pop();
+        }
+        return this.unmaskCache.get(rootId);
     }
 
     // unmask(text).length を展開せずに求める
