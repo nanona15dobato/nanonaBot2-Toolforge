@@ -36,7 +36,7 @@
     "w-ja-nn4": {
       "status": "active",
       "taskname": "種別C:自動Subst展開",
-      "description": "[[:w:ja:Wikipedia:Bot作業依頼#定期作業としてのsubst展開]]",
+      "description": "[[:w:ja:Wikipedia:Bot作業依頼/過去ログ/2026年6月#定期作業としてのsubst展開]]",
       "file": "subster.js",
       "botstemplate": "1",
       "reqlink": ":w:ja:利用者:NanonaBot2/使用申請#nanonaBot2_20260522",
@@ -48,8 +48,8 @@
       "description": "最終編集から7日以上経過した公開中の記事を[[:n:ja:ウィキニュース:記事のアーカイブ|アーカイブ]]する。",
       "file": "old/jawn-archiver.js",
       "botstemplate": "1",
-      "reqlink": "",
-      "retired": { "date": "", "reason": "ウィキニュース日本語版の閉鎖" }
+      "reqlink": ":n:ja:ウィキニュース:管理者連絡帳#nanonaBot2へのBotフラグ",
+      "retired": { "date": "2026-05-04", "reason": "ウィキニュース日本語版の閉鎖" }
     }
   },
   "jobs": {
