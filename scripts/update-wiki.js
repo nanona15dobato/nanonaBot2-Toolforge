@@ -32,25 +32,16 @@ async function updateWiki() {
     await bot.login();
     await jawpbot.login();
     const pageTitle = 'User:NanonaBot2/tasks.json';
-    const pageData = await bot.read(pageTitle);
-    const wikiContent = pageData?.revisions?.[0]?.content || '';
-    const wikijson = JSON.parse(wikiContent || '{}');
-
-    wikijson['NanonaBot2'] = {
-        overall_version: jsonData.overall_version || wikijson['NanonaBot2']?.overall_version || '0.0.0',
-        build_date: jsonData.build_date || wikijson['NanonaBot2']?.build_date || new Date().toISOString()
-    };
-    Object.keys(jsonData.files || {}).forEach(taskId => {
-        const fileInfo = jsonData.files[taskId];
-        const taskInfo = wikijson[taskId] || {};
-        taskInfo.version = fileInfo.hash || taskInfo.version || '0.0.0';
-        taskInfo.lastupdate = fileInfo.last_updated || taskInfo.lastupdate || new Date().toISOString();
-        wikijson[taskId] = taskInfo;
-    });
+    // tasks.json（台帳）から生成した内容でページ全体を置き換える
+    const wikijson = jsonData.wiki;
+    if (!wikijson) {
+        console.error('version_info.json に wiki がありません。scripts/build.js でビルドし直してください。');
+        process.exit(1);
+    }
 
     try {
-        await bot.save(pageTitle, JSON.stringify(wikijson), '自動デプロイ: バージョン情報を更新');
-        await jawpbot.save(pageTitle, JSON.stringify(wikijson), '自動デプロイ: バージョン情報を更新');
+        await bot.save(pageTitle, JSON.stringify(wikijson, null, '\t'),'自動デプロイ: バージョン情報を更新');
+        await jawpbot.save(pageTitle, JSON.stringify(wikijson, null, '\t'),'自動デプロイ: バージョン情報を更新');
         console.log(`Successfully updated ${pageTitle}`);
     } catch (err) {
         console.error('Failed to update wiki:', err);

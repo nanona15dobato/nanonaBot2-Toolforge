@@ -16,15 +16,59 @@ Wikitextの解析・テンプレート展開・ページ生成・タスク状態
 
 ## タスク
 
-| ファイル | task ID | 概要 |
-| --- | --- | --- |
-| `src/CPagemake.js` | `w-ja-nn1` | カテゴリ議論用日別ページを作成 |
-| `src/old/gethighrevs.js` | `w-ja-nn2` | ~~レプリカDBを利用したページ処理~~→廃止 |
-| `src/sandbox-clean.js` | `w-ja-nn3` | サンドボックスの砂場ならし |
-| `src/subster.js` | `w-ja-nn4` | 自動subst展開 |
-| `src/old/jawn-archiver.js` | `n-ja-nn1` | ~~自動アーカイブ処理~~→Wikinews閉鎖 |
+タスクの情報はすべて [`tasks.json`](tasks.json)（タスク台帳）で管理します。
+名前・説明・実行ファイル・cron・使用申請・廃止の扱いはここだけを書き換えてください。
 
-`src/old/` 以下は旧タスクです。新規の定期実行設定に追加する場合は、処理内容を確認してから利用してください。
+| task ID | ファイル | 状態 | 概要 |
+| --- | --- | --- | --- |
+| `w-ja-nn1` | `src/CPagemake.js` | 稼働 | カテゴリ議論用日別ページを作成 |
+| `w-ja-nn2` | `src/old/gethighrevs.js` | 廃止 | 版数の多いページの抽出 |
+| `w-ja-nn3` | `src/sandbox-clean.js` | 稼働 | サンドボックスの砂場ならし |
+| `w-ja-nn4` | `src/subster.js` | 稼働 | 自動subst展開 |
+| `n-ja-nn1` | `src/old/jawn-archiver.js` | 廃止 | 記事の自動アーカイブ（Wikinews閉鎖） |
+
+一覧は次のコマンドで確認できます（台帳の検証も兼ねます）。
+
+```sh
+node scripts/task-registry.js check
+```
+
+### tasks.json の書き方
+
+```jsonc
+{
+  "defaults": { "image": "node18", "deployDir": "bot", "logDir": "logs" },
+  "tasks": {
+    "w-ja-nn1": {
+      "status": "active",            // active（稼働対象） / retired（廃止）
+      "taskname": "種別I:...",        // メタの一覧に表示する名前（wikitext可）
+      "description": "...",          // 説明（wikitext可）
+      "file": "CPagemake.js",        // src/ からの相対パス。const taskId と一致させる
+      "botstemplate": "NA",          // {{bots}}対応: "1" / "0" / "NA"
+      "reqlink": ":w:ja:利用者:NanonaBot2/使用申請",
+      "job": { "name": "cat-disc-make", "schedule": "0 19 * * *" },  // cronはUTC
+      "execTime": "..."              // 省略時は schedule から「毎日午前4時(JST)」等を自動生成
+    }
+  },
+  "jobs": {                          // タスク以外の定期ジョブ（ログ整理など）
+    "archive-logs": { "command": "node bot/archive-logs.js", "schedule": "0 0 * * *" }
+  }
+}
+```
+
+### タスクを廃止するとき
+
+1. `status` を `"retired"` にし、`retired` に日付と理由を書く。
+   ```json
+   "retired": { "date": "2026-09-14", "reason": "履歴保存の廃止に伴い終了" }
+   ```
+2. 必要ならファイルを `src/old/` へ移し、`file` を合わせる。`job` は記録として残してよい。
+
+廃止したタスクは次のように扱われます。
+
+- `myjobs.yaml` に出力されない（cronから外れる）
+- メタの一覧で「廃止」と表示され、停止・変更リンクが出ない
+- メタの稼働スイッチが `1` のままでも `checkTaskStatusAndExit` が実行前に終了する
 
 ## 必要なもの
 
@@ -60,7 +104,8 @@ MediaWikiの認証情報は環境変数で設定します。
 
 - `User:NanonaBot2/tasks/data`
 
-全体の稼働スイッチ `ALL` と各 `task ID` の値が `1` の場合にタスクが実行されます。タスク状態の更新は次のコマンドで実行できます。
+全体の稼働スイッチ `ALL` と各 `task ID` の値が `1` の場合にタスクが実行されます（廃止タスクは除く）。
+一時停止・再開はこのページで、恒久的な廃止は `tasks.json` で行います。タスク状態の更新は次のコマンドで実行できます。
 
 ```sh
 node src/utils/getTasks.js update
@@ -80,9 +125,11 @@ npm run build
 
 ビルドでは次の処理を行います。
 
+- `tasks.json` を検証（ソースの `taskId` との対応、ファイルの有無、cron など）
 - `src/` 以下のJavaScriptを `dist/` にコピー
 - 各タスクのファイルハッシュを埋め込み
-- `version_info.json` を生成
+- `version_info.json` を生成（メタウィキ用JSONを含む）
+- `tasks.json` を `dist/` にコピーし、`dist/myjobs.yaml` を生成
 - `update-wiki.js` と `archive-logs.js` を `dist/` に配置
 - `package.json` と `package-lock.json` を `dist/` にコピー
 
@@ -93,11 +140,28 @@ node dist/CPagemake.js
 node dist/subster.js
 ```
 
-ビルド後のバージョン情報をWikiへ反映する場合は、認証情報を設定したうえで実行します。
+`update-wiki.js` は `User:NanonaBot2/tasks.json`（メタ・jawp）を台帳から生成した内容で置き換えます。Wiki上で直接編集した内容は次のデプロイで上書きされるため、変更は `tasks.json` に行ってください。
 
 ```sh
 node dist/update-wiki.js
 ```
+
+### ジョブ（cron）の反映
+
+デプロイ先では `bot/myjobs.yaml` が生成されます。手動で反映する場合:
+
+```sh
+toolforge jobs load bot/myjobs.yaml
+```
+
+GitHubのリポジトリ変数 `TOOLFORGE_LOAD_JOBS` を `true` にすると、デプロイ時に自動で反映します。
+
+### Webからの参照
+
+Web（nanonaBot2Web）からは、ツールのホームにある次のファイルを読めばタスク情報を表示できます。
+
+- `bot/tasks.json` … 台帳そのもの
+- `bot/version_info.json` … バージョン・ビルド日時と、メタ表示用に整形済みの `wiki`
 
 ## ログ
 
@@ -123,9 +187,9 @@ node dist/archive-logs.js
 
 タスクを追加・変更する場合は、次の点を確認してください。
 
-1. `taskId` を定義し、`getTasks.js` の稼働制御対象にする。
+1. `taskId` を定義し、`getTasks.js` の稼働制御対象にする。`tasks.json` にも同じIDで登録する。
 2. MediaWiki APIの認証情報を環境変数から取得する。
 3. 外部DBを利用する場合は、認証情報をコードへ埋め込まない。
 4. `npm run build` を実行し、`dist/` の生成物を確認する。
-5. Toolforgeのジョブ設定とWiki上のタスク状態を確認する。
+5. `myjobs.yaml` の生成結果とWiki上のタスク状態を確認する。
 

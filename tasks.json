@@ -1,0 +1,73 @@
+{
+  "defaults": {
+    "image": "node18",
+    "deployDir": "bot",
+    "logDir": "logs"
+  },
+  "tasks": {
+    "w-ja-nn1": {
+      "status": "active",
+      "taskname": "種別I:[[:w:ja:プロジェクト:カテゴリ関連/議論|PJ:カテゴリ関連/議論]]日次ページ作成",
+      "description": "日別議論ページ「プロジェクト:カテゴリ関連/議論/yyyy年/M月d日」の定期作成",
+      "file": "CPagemake.js",
+      "botstemplate": "NA",
+      "reqlink": ":w:ja:利用者:NanonaBot2/使用申請",
+      "job": { "name": "cat-disc-make", "schedule": "0 19 * * *" }
+    },
+    "w-ja-nn2": {
+      "status": "retired",
+      "taskname": "種別I:版数の多いページの抽出",
+      "description": "版数が4,000(報告は4500)を超えるページを抽出し、[[:w:ja:利用者:NanonaBot2/版数の多いページ一覧]]・[[:w:ja:Wikipedia:管理者伝言板/各種初期化依頼]]へ。",
+      "file": "old/gethighrevs.js",
+      "botstemplate": "0",
+      "reqlink": ":w:ja:利用者:NanonaBot2/使用申請#nanonaBot2_20250813",
+      "job": { "name": "gethighrevs", "schedule": "0 16 * * 6" },
+      "retired": { "date": "2026-09-14", "reason": "履歴保存の廃止に伴い終了" }
+    },
+    "w-ja-nn3": {
+      "status": "active",
+      "taskname": "種別A:サンドボックスの砂場ならし",
+      "description": "[[:w:ja:Wikipedia‐ノート:サンドボックス]],[[:w:ja:Help:ビジュアルエディター/sandbox]],[[:w:ja:Help:VisualEditor_sandbox]]の初期化。",
+      "file": "sandbox-clean.js",
+      "botstemplate": "0",
+      "reqlink": ":w:ja:利用者:NanonaBot2/使用申請#nanonaBot2_20250813",
+      "job": { "name": "sandbox-clean", "schedule": "0 15 * * *" }
+    },
+    "w-ja-nn4": {
+      "status": "active",
+      "taskname": "種別C:自動Subst展開",
+      "description": "[[:w:ja:Wikipedia:Bot作業依頼#定期作業としてのsubst展開]]",
+      "file": "subster.js",
+      "botstemplate": "1",
+      "reqlink": ":w:ja:利用者:NanonaBot2/使用申請#nanonaBot2_20260522",
+      "job": { "name": "subster", "schedule": "0 17 * * *" }
+    },
+    "n-ja-nn1": {
+      "status": "retired",
+      "taskname": "記事の自動アーカイブ",
+      "description": "最終編集から7日以上経過した公開中の記事を[[:n:ja:ウィキニュース:記事のアーカイブ|アーカイブ]]する。",
+      "file": "old/jawn-archiver.js",
+      "botstemplate": "1",
+      "reqlink": "",
+      "retired": { "date": "", "reason": "ウィキニュース日本語版の閉鎖" }
+    }
+  },
+  "jobs": {
+    "archive-logs": {
+      "description": "公開・非公開ログのアーカイブ",
+      "command": "node bot/archive-logs.js",
+      "schedule": "0 0 * * *"
+    },
+    "checktasks": {
+      "description": "メタの稼働状態をjawpへ反映",
+      "command": "node bot/utils/getTasks.js update",
+      "schedule": "45 * * * *"
+    },
+    "autologrotate": {
+      "description": "ジョブ出力ログのローテーション",
+      "command": "logrotate -v logrotate-all.conf --state logrotate-all.state",
+      "image": "mariadb",
+      "schedule": "0 0 15 * *"
+    }
+  }
+}
