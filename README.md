@@ -66,7 +66,7 @@ node scripts/task-registry.js check
 
 廃止したタスクは次のように扱われます。
 
-- `myjobs.yaml` に出力されない（cronから外れる）
+- `myjobs.yaml` に出力されない（既存のジョブは手動で削除する。下記「ジョブ（cron）の反映」参照）
 - メタの一覧で「廃止」と表示され、停止・変更リンクが出ない
 - メタの稼働スイッチが `1` のままでも `checkTaskStatusAndExit` が実行前に終了する
 
@@ -152,6 +152,12 @@ node dist/update-wiki.js
 
 ```sh
 toolforge jobs load bot/myjobs.yaml
+```
+
+`jobs load` はファイルにないジョブを削除しません。タスクを廃止したときは、そのジョブを手動で削除してください。
+
+```sh
+toolforge jobs delete <ジョブ名>
 ```
 
 GitHubのリポジトリ変数 `TOOLFORGE_LOAD_JOBS` を `true` にすると、デプロイ時に自動で反映します。
