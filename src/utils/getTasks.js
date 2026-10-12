@@ -14,6 +14,27 @@ const bot = new Mwn({
 const pageTitle = 'User:NanonaBot2/tasks/data';
 
 /**
+ * タスク台帳 (tasks.json) から指定タスクの定義を取得する
+ * dist では bot/tasks.json、src では リポジトリ直下の tasks.json を参照
+ * @param {string} taskId
+ * @returns {object|null} 台帳が読めない、または未登録の場合は null
+ */
+function getTaskDefinition(taskId) {
+    for (const candidate of ['../tasks.json', '../../tasks.json']) {
+        const registryPath = path.join(__dirname, candidate);
+        if (!fs.existsSync(registryPath)) continue;
+        try {
+            const registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8'));
+            return registry.tasks?.[taskId] ?? null;
+        } catch (error) {
+            console.error('tasks.json の読み込みに失敗しました:', error);
+            return null;
+        }
+    }
+    return null;
+}
+
+/**
  * メタウィキからタスクデータを取得する関数
  * @returns {String}  - wikitext
  */
@@ -127,6 +148,15 @@ async function getTaskStatus(taskId) {
  * @returns {Promise<boolean>} タスクが稼働中の場合に true を返します。それ以外の場合は process.exit() によりプロセスを終了し、呼び出し元には戻りません。
  */
 async function checkTaskStatusAndExit(taskId) {
+    const definition = getTaskDefinition(taskId);
+    if (definition?.status === 'retired') {
+        console.log(`タスク ${taskId} は廃止済みです (${definition.retired?.reason || '理由未記入'})`);
+        process.exit(0);
+    }
+    if (!definition) {
+        console.warn(`タスク ${taskId} は tasks.json に登録されていません`);
+    }
+
     const status = await getTaskStatus(taskId);
 
     if (status === null) {
@@ -176,6 +206,7 @@ if (require.main === module) {
 
 module.exports = {
     getTaskStatus,
+    getTaskDefinition,
     checkTaskStatusAndExit,
     updateTaskStatus
 };

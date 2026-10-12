@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { execSync } = require('child_process');
+const { loadRegistry, validateRegistry, toJobsYaml, toWikiJson } = require('./task-registry');
 
 const projectRoot = path.join(__dirname, '..');
 const srcDir = path.join(projectRoot, 'src');
@@ -15,6 +16,7 @@ const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), '
 const overallVersion = pkg.version;
 
 const versionList = {};
+const declaredTaskIds = {};
 
 function collectJsFiles(dir, results = []) {
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -65,6 +67,7 @@ files.forEach(srcPath => {
     const idMatch = content.match(/const\s+taskId\s*=\s*['"]([^'"]+)['"]/);
     if (idMatch) {
         const taskId = idMatch[1];
+        declaredTaskIds[taskId] = relPath;
         const lastUpdated = getFileLastModified(srcPath);
 
         versionList[taskId] = {
@@ -75,14 +78,28 @@ files.forEach(srcPath => {
     }
 });
 
+// タスク台帳の検証
+const registry = loadRegistry();
+const registryErrors = validateRegistry(registry, { srcDir, declaredTaskIds });
+if (registryErrors.length) {
+    console.error('tasks.json に問題があります:');
+    registryErrors.forEach(e => console.error(`- ${e}`));
+    process.exit(1);
+}
+
 fs.copyFileSync(path.join(projectRoot, 'package.json'), path.join(distDir, 'package.json'));
 fs.copyFileSync(path.join(projectRoot, 'package-lock.json'), path.join(distDir, 'package-lock.json'));
+fs.copyFileSync(path.join(projectRoot, 'tasks.json'), path.join(distDir, 'tasks.json'));
+fs.writeFileSync(path.join(distDir, 'myjobs.yaml'), toJobsYaml(registry));
+
+const buildDate = new Date().toISOString();
 
 // Wiki更新用のJSONを生成
 const wikiJsonData = {
     overall_version: overallVersion,
-    build_date: new Date().toISOString(),
-    files: versionList
+    build_date: buildDate,
+    files: versionList,
+    wiki: toWikiJson(registry, { overallVersion, buildDate, files: versionList })
 };
 
 
@@ -97,4 +114,4 @@ fs.copyFileSync(
     path.join(distDir, 'archive-logs.js')
 );
 
-console.log('Build complete. version_info.json generated.');
+console.log('Build complete. version_info.json, tasks.json, myjobs.yaml generated.');

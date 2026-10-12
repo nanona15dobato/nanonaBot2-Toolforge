@@ -74,6 +74,16 @@ jobs:
         run: |
           rsync -rlzv --omit-dir-times --rsync-path="become $TOOL_NAME rsync" --delete --exclude='logs/'  --exclude='test/' --exclude='node_modules/' --exclude='.env' --exclude='replica.my.cnf' --exclude='data/' --exclude='highRevPages.json' ./dist/ $TOOL_USER@login.toolforge.org:/data/project/$TOOL_NAME/bot/
 
+      # tasks.json から生成した bot/myjobs.yaml を cron 定義として反映する
+      # リポジトリ変数 TOOLFORGE_LOAD_JOBS を 'true' にしたときのみ実行
+      - name: Load Toolforge jobs
+        if: vars.TOOLFORGE_LOAD_JOBS == 'true'
+        env:
+          TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
+          TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
+        run: |
+          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME -- toolforge jobs load bot/myjobs.yaml"
+
       - name: Update Wiki and Toolforge jobs
         env:
           TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
