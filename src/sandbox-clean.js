@@ -33,6 +33,7 @@ async function cleanstart() {
     };
     for (const [sandboxTitle, templatename] of Object.entries(sandboxes)) {
         console.log(`処理中: ${sandboxTitle} (${templatename})`);
+        await setTimeout(10000);
 
         let revcount = 0;
         let deletedrevcount = 0;
@@ -53,8 +54,10 @@ async function cleanstart() {
             console.log('通常版数:', revcount);
         } catch (e) {
             console.error('通常版取得エラー:', e);
-            logger.error(taskId, `通常版取得エラー: ${sandboxTitle}`, true);
-            process.exit(1);
+            logs.error.push([sandboxTitle, 0]);
+            logger.error(taskId, `通常版取得エラー: ${sandboxTitle}: ${e.message}`,false,{stack:e.stack});
+            logger.error(taskId, `通常版取得エラー: ${sandboxTitle}`, true);            
+            continue;
         }
 
         try {
@@ -70,8 +73,10 @@ async function cleanstart() {
             console.log('削除済み版数:', deletedrevcount);
         } catch (e) {
             console.error('削除済み版取得エラー:', e);
+            logs.error.push([sandboxTitle, 0]);
+            logger.error(taskId, `削除済み版取得エラー: ${sandboxTitle}: ${e.message}`,false,{stack:e.stack});
             logger.error(taskId, `削除済み版取得エラー: ${sandboxTitle}`, true);
-            process.exit(1);
+            continue;
         }
 
         const total = revcount + deletedrevcount;
@@ -87,7 +92,10 @@ async function cleanstart() {
                 });
             } catch (e) {
                 console.error('白紙化編集エラー:', e);
+                logs.error.push([sandboxTitle, total]);
+                logger.error(taskId, `白紙化編集エラー: ${sandboxTitle}: ${e.message}`,false,{stack:e.stack});
                 logger.error(taskId, `白紙化編集エラー: ${sandboxTitle}`, true);
+                await setTimeout(10000);
                 continue;
             }
             console.log(`白紙化中: ${sandboxTitle} (${templatename})`, summary);
@@ -103,15 +111,13 @@ async function cleanstart() {
                 logger.error(taskId, `白紙化に失敗しました: ${sandboxTitle}（版数: ${total}）`);
             }
         }
-        // 10秒待機
-        await setTimeout(10000);
     }
     // ログ出力メッセージを生成 ひとつにまとめる。
     let logMessages = [];
     let logMessage = '';
-    if (logs.success.length > 0) logMessages.push(`成功: ${logs.success.map(([title, count]) => `${title}（${count}版）`).join(', ')}\n`);
-    if (logs.error.length > 0) logMessages.push(`失敗: ${logs.error.map(([title, count]) => `${title}（${count}版）`).join(', ')}\n`);
-    if (logs.nochange.length > 0) logMessages.push(`変更なし: ${logs.nochange.map(([title, count]) => `${title}（${count}版）`).join(', ')}\n`);
+    if (logs.success.length > 0) logMessages.push(`成功: ${logs.success.map(([title, count]) => `${title}（${count}版）`).join(', ')}`);
+    if (logs.error.length > 0) logMessages.push(`失敗: ${logs.error.map(([title, count]) => `${title}（${count}版）`).join(', ')}`);
+    if (logs.nochange.length > 0) logMessages.push(`変更なし: ${logs.nochange.map(([title, count]) => `${title}（${count}版）`).join(', ')}`);
     if (logMessages.length > 0) {
         logMessage = logMessages.join('/');
         if (logs.error.length > 0) {
