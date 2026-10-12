@@ -1,6 +1,8 @@
 class WikitextParser {
     constructor() {
         this.masks = new Map();
+        this.maskLengths = new Map();
+        this.unmaskCache = new Map();
         this.maskCounter = 0;
         this.magicWords = new Set([
             'currentyear', 'currentmonth', 'currentmonth1', 'currentmonthname', 'currentday', 'currentday2',
@@ -56,20 +58,57 @@ class WikitextParser {
     mask(text, prefix) {
         const id = `\x01${prefix}_${this.maskCounter++}\x02`;
         this.masks.set(id, text);
+        this.maskLengths.set(id, this.originalLength(text));
         return id;
     }
 
+    // マスク内のマスクも展開する(展開結果はキャッシュ)
     unmask(text) {
         if (typeof text !== 'string') return text;
-        const maskRegex = /\x01([A-Z_]+_\d+)\x02/g;
-        let prev;
-        do {
-            prev = text;
-            text = text.replace(maskRegex, (match) => {
-                return this.masks.has(match) ? this.masks.get(match) : match;
-            });
-        } while (text !== prev);
-        return text;
+        return text.replace(/\x01[A-Z_]+_\d+\x02/g, (id) => this.masks.has(id) ? this.unmaskId(id) : id);
+    }
+
+    // 深い入れ子でもコールスタックを使わないよう、明示的なスタックで内側から展開する
+    unmaskId(rootId) {
+        if (this.unmaskCache.has(rootId)) return this.unmaskCache.get(rootId);
+        const maskRegex = /\x01[A-Z_]+_\d+\x02/g;
+        const stack = [rootId];
+        while (stack.length > 0) {
+            const id = stack[stack.length - 1];
+            if (this.unmaskCache.has(id)) { stack.pop(); continue; }
+            const content = this.masks.get(id);
+            const pending = (content.match(maskRegex) || []).filter(child => this.masks.has(child) && !this.unmaskCache.has(child));
+            if (pending.length > 0) {
+                for (const child of pending) stack.push(child);
+                continue;
+            }
+            this.unmaskCache.set(id, content.replace(maskRegex, child => this.masks.has(child) ? this.unmaskCache.get(child) : child));
+            stack.pop();
+        }
+        return this.unmaskCache.get(rootId);
+    }
+
+    // unmask(text).length を展開せずに求める
+    originalLength(text) {
+        const maskRegex = /\x01[A-Z_]+_\d+\x02/g;
+        let len = text.length;
+        let match;
+        while ((match = maskRegex.exec(text)) !== null) {
+            if (this.maskLengths.has(match[0])) len += this.maskLengths.get(match[0]) - match[0].length;
+        }
+        return len;
+    }
+
+    // マスク済みテキスト上の位置 → 元テキスト上の位置(昇順に呼ぶと差分だけ計算する)
+    createIndexMapper(text) {
+        let cursorMasked = 0;
+        let cursorOriginal = 0;
+        return (maskedIndex) => {
+            if (maskedIndex < cursorMasked) { cursorMasked = 0; cursorOriginal = 0; }
+            cursorOriginal += this.originalLength(text.substring(cursorMasked, maskedIndex));
+            cursorMasked = maskedIndex;
+            return cursorOriginal;
+        };
     }
 
     normalizeTitle(title) {
@@ -104,6 +143,8 @@ class WikitextParser {
 
     parse(wikitext, options = {}) {
         this.masks = new Map();
+        this.maskLengths = new Map();
+        this.unmaskCache = new Map();
         this.maskCounter = 0;
 
         let config = {
@@ -157,8 +198,14 @@ class WikitextParser {
 
             let match;
             unifiedRegex.lastIndex = 0;
+            // 1パス分の置換結果は pieces に溜めて最後に連結する(毎回の文字列再構築を避ける)
+            const pieces = [];
+            let copiedUntil = 0;
+            // マスクは元の長さを保つので、prev 上の位置から元テキスト上の位置を差分計算できる
+            let cursorMasked = 0;
+            let cursorOriginal = 0;
 
-            while ((match = unifiedRegex.exec(text)) !== null) {
+            while ((match = unifiedRegex.exec(prev)) !== null) {
                 const m = match[0];
                 const [_, varContent, tmplContent, wlinkContent, elinkUrl, elinkText, tableContent, refAttrs1, refContent, refAttrs2] = match;
                 const offset = match.index;
@@ -169,8 +216,10 @@ class WikitextParser {
                     continue;
                 }
 
-                const startIndex = this.unmask(text.substring(0, offset)).length;
-                const position = { start: startIndex, end: startIndex + this.unmask(m).length };
+                cursorOriginal += this.originalLength(prev.substring(cursorMasked, offset));
+                cursorMasked = offset;
+                const startIndex = cursorOriginal;
+                const position = { start: startIndex, end: startIndex + this.originalLength(m) };
                 let maskId = "";
 
                 if (varContent !== undefined) {
@@ -317,23 +366,28 @@ class WikitextParser {
                     }
                 }
 
-                text = text.substring(0, offset) + maskId + text.substring(offset + m.length);
-                unifiedRegex.lastIndex = offset + maskId.length;
+                pieces.push(prev.substring(copiedUntil, offset), maskId);
+                copiedUntil = offset + m.length;
+                unifiedRegex.lastIndex = copiedUntil;
             }
+            pieces.push(prev.substring(copiedUntil));
+            text = pieces.join('');
         } while (text !== prev);
 
         if (config.headings) {
             const headingMatches = [];
             const headingRegex = /^(={1,6})\s*(.+?)\s*\1\s*$/gm;
             let match;
+            const toOriginalIndex = this.createIndexMapper(text);
             while ((match = headingRegex.exec(text)) !== null) {
-                let startIndex = this.unmask(text.substring(0, match.index)).length;
+                let startIndex = toOriginalIndex(match.index);
                 headingMatches.push({
                     level: match[1].length, title: match[2].trim(), original: match[0],
                     maskedStartIndex: match.index, maskedEndIndex: headingRegex.lastIndex,
-                    position: { start: startIndex, end: startIndex + this.unmask(match[0]).length }
+                    position: { start: startIndex, end: startIndex + this.originalLength(match[0]) }
                 });
             }
+            const textOriginalLength = this.originalLength(text);
             const hierarchyStack = []; const idCounters = new Map();
             for (let i = 0; i < headingMatches.length; i++) {
                 let current = headingMatches[i];
@@ -343,13 +397,15 @@ class WikitextParser {
                 while (hierarchyStack.length > 0 && hierarchyStack[hierarchyStack.length - 1].level >= current.level) hierarchyStack.pop();
                 let currentParents = hierarchyStack.map(h => ({ id: h.id, level: h.level, title: h.title }));
                 let contentEndMaskedIndex = text.length;
+                let contentEndOriginalIndex = null;
                 for (let j = i + 1; j < headingMatches.length; j++) {
-                    if (headingMatches[j].level <= current.level) { contentEndMaskedIndex = headingMatches[j].maskedStartIndex; break; }
+                    if (headingMatches[j].level <= current.level) { contentEndMaskedIndex = headingMatches[j].maskedStartIndex; contentEndOriginalIndex = headingMatches[j].position.start; break; }
                 }
+                if (contentEndOriginalIndex === null) contentEndOriginalIndex = textOriginalLength;
                 let contentStartOriginalIndex = current.position.end;
                 parsedData.headings.push({
                     id: headingId, level: current.level, title: current.title, original: current.original, parents: currentParents,
-                    position: { header: { start: current.position.start, end: current.position.end }, content: { start: contentStartOriginalIndex, end: this.unmask(text.substring(0, contentEndMaskedIndex)).length } },
+                    position: { header: { start: current.position.start, end: current.position.end }, content: { start: contentStartOriginalIndex, end: contentEndOriginalIndex } },
                     contentRaw: text.substring(current.maskedEndIndex, contentEndMaskedIndex)
                 });
                 hierarchyStack.push({ id: headingId, level: current.level, title: current.title });
@@ -359,11 +415,12 @@ class WikitextParser {
         if (config.lists) {
             const listRegex = /^([\*\#\:\;]+)\s*(.*)$/gm;
             let match;
+            const toOriginalIndex = this.createIndexMapper(text);
             while ((match = listRegex.exec(text)) !== null) {
-                let startIndex = this.unmask(text.substring(0, match.index)).length;
+                let startIndex = toOriginalIndex(match.index);
                 parsedData.lists.push({
                     markers: match[1], level: match[1].length, contentRaw: match[2].trim(),
-                    position: { start: startIndex, end: startIndex + this.unmask(match[0]).length }, original: match[0]
+                    position: { start: startIndex, end: startIndex + this.originalLength(match[0]) }, original: match[0]
                 });
             }
         }

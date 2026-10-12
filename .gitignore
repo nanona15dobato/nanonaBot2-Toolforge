@@ -13,3 +13,5 @@ replica.my.cnf
 # Logs
 logs/
 data/
+
+temp/
