@@ -89,4 +89,4 @@ jobs:
           TOOL_USER: ${{ secrets.TOOLFORGE_USER }}
           TOOL_NAME: ${{ secrets.TOOLFORGE_TOOL_NAME }}
         run: |
-          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME -- bash -c 'toolforge jobs delete wiki-update || true; toolforge jobs run wiki-update --command \"node bot/update-wiki.js\" --image node18 --wait'"
+          ssh $TOOL_USER@login.toolforge.org "become $TOOL_NAME -- bash -c 'toolforge jobs delete wiki-update || true; toolforge jobs run wiki-update --command \"node bot/update-wiki.js\" --image node18 --filelog-stdout logs/wiki-update.out --filelog-stderr logs/wiki-update.err --wait'"
