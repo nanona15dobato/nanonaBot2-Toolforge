@@ -1,4 +1,5 @@
 const { Mwn } = require('mwn');
+const { applyEditThrottle } = require('./utils/editThrottle');
 const { setTimeout } = require("node:timers/promises");
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { parseSection } = require('./utils/parse.js');
@@ -7,13 +8,13 @@ const taskId = 'w-ja-nn3';
 const nnversion = '__FILE_HASH__';
 
 
-const bot = new Mwn({
+const bot = applyEditThrottle(new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
     userAgent: `nanonaBot2/sandbox-clean [${nnversion}] (Toolforge)`,
     defaultParams: { format: 'json' }
-});
+}));
 
 const sandboxes = {
     /*"サンドボックス名": "初期wikitext(subst展開)",*/

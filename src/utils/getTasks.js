@@ -1,16 +1,17 @@
 const { Mwn } = require('mwn');
+const { applyEditThrottle } = require('./editThrottle');
 const fs = require('fs');
 const path = require('path');
 const nnversion = '__FILE_HASH__';
 
 // MediaWiki APIクライアントの初期化
-const bot = new Mwn({
+const bot = applyEditThrottle(new Mwn({
     apiUrl: 'https://meta.wikimedia.org/w/api.php',
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
     userAgent: `nanonaBot2/getTasks [${nnversion}] (Toolforge)`,
     defaultParams: { format: 'json' }
-});
+}));
 const pageTitle = 'User:NanonaBot2/tasks/data';
 
 /**
@@ -98,13 +99,13 @@ async function updateTaskStatus(data) {
     }
     wikitext = "<!-- 稼働制御は[[m:"+ pageTitle + "]]にてお願い致します。-->\n" + wikitext.trimEnd();
 
-    const jawpbot = new Mwn({
+    const jawpbot = applyEditThrottle(new Mwn({
         apiUrl: 'https://ja.wikipedia.org/w/api.php',
         username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
         password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
         userAgent: 'nanonaBot2/getTasks 1.2.2',
         defaultParams: { format: 'json' }
-    });
+    }));
     await jawpbot.login();
     const re = await jawpbot.save('利用者:NanonaBot2/tasks/data', wikitext, 'Bot: タスク状態の更新');
     if (re.result !== 'Success') {

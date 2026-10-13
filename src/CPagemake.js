@@ -1,16 +1,17 @@
 const { Mwn } = require('mwn');
+const { applyEditThrottle } = require('./utils/editThrottle');
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { logger } = require("./utils/logger");
 const taskId = 'w-ja-nn1';
 const nnversion = '__FILE_HASH__';
 
-const bot = new Mwn({
+const bot = applyEditThrottle(new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
     userAgent: `nanonaBot2/CPagemake [${nnversion}] (Toolforge)`,
     defaultParams: { format: 'json' }
-});
+}));
 
 
 (async () => {
