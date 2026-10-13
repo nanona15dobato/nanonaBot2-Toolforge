@@ -209,7 +209,7 @@
 :: 直接のカテゴリ指定が見つからず変更しなかったページ（テンプレート経由などの可能性。要確認）1件: [[:Template:例]]
 :: 編集できなかったページ1件:
 ::* [[:例の記事]] - {{bots}}/{{nobots}}により編集が拒否されています
-:: [[:Category:原爆]]は空になりました。 --~~~~
+:: [[:Category:Name1]]は空になりました。 --~~~~
 ```
 
 ### 6.4 キューページへの書き込み方
@@ -275,8 +275,8 @@
 ```sh
 node dist/category-queue.js                        # 未処理のキューをすべて実行して返信
 node dist/category-queue.js --dry-run              # 編集せず変更前後を保存（稼働スイッチ・緊急停止は確認しない）
-node dist/category-queue.js --only "原爆"           # 見出しにその文字列を含む節だけ
-node dist/category-queue.js --only "原爆" --max-pages 3  # 先頭3ページだけ（返信しない）
+node dist/category-queue.js --only "Name1"           # 見出しにその文字列を含む節だけ
+node dist/category-queue.js --only "Name1" --max-pages 3  # 先頭3ページだけ（返信しない）
 node dist/category-queue.js --no-report            # 実行するが返信しない
 node dist/category-queue.js --rollback <ID>        # 取り消し
 ```
