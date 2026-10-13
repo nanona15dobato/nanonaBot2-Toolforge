@@ -138,7 +138,7 @@ siteinfo を読む前でも、日本語版ウィキペディアのファイル(6
 - subster と同じ `{ templates: true }`：**すべてのページで完全に一致**（名前・引数・位置・原文）
 - 全要素：追加した項目と名前空間の正規化を除いて完全に一致
 
-`test/parse2.test.js` は、`test/legacy/parse2-v1.js`（旧版）と `test/fixtures/` の実ページ3件で同じ比較を毎回行います。
+`test/parse2.test.js` は、`test/legacy/parse2-v1.js`（旧版）と `test/fixtures/` に置いた実ページの wikitext（`.txt` / `.wiki`）で同じ比較を行います。実ページはリポジトリに含めないので、比べたいときは API などで取得して置いてください（無ければこのテストは飛ばします）。
 
 ## 5. 性能
 

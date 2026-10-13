@@ -28,7 +28,7 @@ bot/
 │       └── categoryQueue/   w-ja-nn5 の部品（queue / replacer / report / status / title）
 ├── scripts/                 ビルド・台帳・Wiki反映・ログ整理
 ├── test/                    node:test のテスト（npm test）
-│   ├── fixtures/            テスト用の実ページ wikitext
+│   ├── fixtures/            テスト用の実ページ wikitext（リポジトリに含めない。各自で置く）
 │   └── legacy/              比較用の旧版 parse2
 ├── docs/                    この資料
 └── tasks.json               タスク台帳

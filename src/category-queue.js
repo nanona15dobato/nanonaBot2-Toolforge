@@ -7,7 +7,7 @@
  * 使い方:
  *   node category-queue.js                 キューを処理する
  *   node category-queue.js --dry-run       編集せず、変更前後の本文を data/category-queue/dry-run/ に保存する
- *   node category-queue.js --only "原爆"    見出しにこの文字列を含む節だけ処理する
+ *   node category-queue.js --only "Name1"    見出しにこの文字列を含む節だけ処理する
  *   node category-queue.js --max-pages 5   1コマンドあたりの対象ページ数を制限する（試験用。返信はしない）
  *   node category-queue.js --no-report     キューページに返信しない
  *   node category-queue.js --rollback <ID> 指定IDのコマンドで行った編集を取り消す
