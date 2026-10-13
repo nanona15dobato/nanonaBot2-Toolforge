@@ -5,6 +5,8 @@
 日本語版Wikipediaで動作する、Node.js製のBotです。
 Wikitextの解析・テンプレート展開・ページ生成・タスク状態の管理・実行ログの保存を、Wikimedia Toolforge上で運用することを想定しています。
 
+仕様・運用の詳しい資料は [docs/](docs/README.md) にあります。
+
 ## 主な機能
 
 - Wikipedia APIを利用したBotタスクの実行
@@ -69,6 +71,34 @@ node scripts/task-registry.js check
 - `myjobs.yaml` に出力されない（既存のジョブは手動で削除する。下記「ジョブ（cron）の反映」参照）
 - メタの一覧で「廃止」と表示され、停止・変更リンクが出ない
 - メタの稼働スイッチが `1` のままでも `checkTaskStatusAndExit` が実行前に終了する
+
+## カテゴリキュー（w-ja-nn5）
+
+仕様の全文は [docs/category-queue.md](docs/category-queue.md) を見てください。
+
+[プロジェクト:カテゴリ関連/キュー](https://ja.wikipedia.org/wiki/プロジェクト:カテゴリ関連/キュー) の、見出しが `Bot:` で始まり `{{BOTREQ}}` がまだ付いていない節を実行し、結果を同じ節に `{{BOTREQ|完了}}` などで返信します。
+
+| 見出し | 動作 | 対象名前空間 |
+| --- | --- | --- |
+| `Bot: [[:Category:A]]を[[:Category:B]]へ`（`と` で5件まで） | 再配属 | 標準・Category |
+| `Bot: (記事) …へ` / `Bot: (カテゴリ) …へ` | 再配属 | 標準のみ / Categoryのみ |
+| `Bot: [[:Category:A]]を[[:Category:B]]に複製` | 複製（Aを残す） | 標準・Category |
+| `Bot: [[:Category:A]]を除去` | 除去 | 標準・Category |
+
+- 書き換えるのは `[[Category:A|ソートキー]]`（ソートキーは引き継ぐ）、`{{リダイレクトの所属カテゴリ}}` のカテゴリ引数、`{{画像提供依頼}}` 等の `cat` 引数。テンプレート経由でのみ所属しているページは変更せず、返信で要確認として挙げる。
+- 本文の最初のリンク（カテゴリ・利用者ページを除く）を議論場所として編集要約に入れる。無ければ不受理。
+- 移動先カテゴリが存在しない場合は不可能として返信する（カテゴリの移動・即時削除の依頼はしない）。
+- `プロジェクト:カテゴリ関連/キュー/緊急停止` の本文が `動作中` 以外なら編集しない（1ページごとに確認）。
+- 編集は `data/category-queue/operations/<ID>.jsonl` に記録し、`--rollback <ID>` で取り消せる。
+- 実行状況を `data/category-queue/status.json`（随時上書き）と `history.jsonl`（終わったコマンド）に書き出し、Web の `/queue` で確認できる。`run.lock/` で二重起動を防ぐ。
+
+```sh
+node dist/category-queue.js --dry-run              # 編集せず変更前後を data/category-queue/dry-run/<ID>/ に保存
+node dist/category-queue.js --only "原爆" --max-pages 3  # 1節・3ページだけ試す（返信しない）
+node dist/category-queue.js                        # 実行して返信
+node dist/category-queue.js --rollback <ID>        # 取り消し
+npm test                                           # 解析・置換のテスト
+```
 
 ## 必要なもの
 
@@ -198,4 +228,5 @@ node dist/archive-logs.js
 3. 外部DBを利用する場合は、認証情報をコードへ埋め込まない。
 4. `npm run build` を実行し、`dist/` の生成物を確認する。
 5. `myjobs.yaml` の生成結果とWiki上のタスク状態を確認する。
+6. `npm test` を実行する。wikitext の解析には `src/utils/parse2.js` を使う（[docs/parser.md](docs/parser.md)）。
 

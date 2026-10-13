@@ -2,7 +2,6 @@ const { Mwn } = require('mwn');
 const { applyEditThrottle } = require('./utils/editThrottle');
 const { setTimeout } = require("node:timers/promises");
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
-const { parseSection } = require('./utils/parse.js');
 const { logger } = require("./utils/logger");
 const taskId = 'w-ja-nn3';
 const nnversion = '__FILE_HASH__';

@@ -3,7 +3,8 @@
   "version": "1.2.2",
   "description": "Node.js Bot for Wikipedia Toolforge",
   "scripts": {
-    "build": "node scripts/build.js"
+    "build": "node scripts/build.js",
+    "test": "node --test test/categoryQueue.test.js test/parse2.test.js"
   },
   "dependencies": {
     "mwn": "^3.0.1",
