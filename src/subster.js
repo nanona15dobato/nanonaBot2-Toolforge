@@ -2,6 +2,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const mysql = require('mysql2/promise');
 const { Mwn } = require('mwn');
+const { applyEditThrottle } = require('./utils/editThrottle');
 const WikitextParser = require('./utils/parse2.js');
 const { allowBots } = require('./utils/parse.js');
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
@@ -9,7 +10,7 @@ const { logger } = require("./utils/logger");
 const taskId = 'w-ja-nn4';
 const nnversion = '__FILE_HASH__';
 
-const bot = new Mwn({
+const bot = applyEditThrottle(new Mwn({
     apiUrl: 'https://ja.wikipedia.org/w/api.php',
     username: process.env.MW_NBOT1_USERNAME || process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT1_PASSWORD || process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
@@ -17,7 +18,7 @@ const bot = new Mwn({
     defaultParams: {
         assert: 'bot'
     }
-});
+}), { priority: 'low' });
 const parser = new WikitextParser();
 
 let namespaceMap = {};
