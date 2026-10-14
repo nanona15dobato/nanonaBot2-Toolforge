@@ -3,11 +3,10 @@
  *
  * 対応する構文（プロジェクト:カテゴリ関連/キュー/導入文）
  *   == Bot: [[:Category:A]]を[[:Category:B]]へ ==
- *   == Bot: [[:Category:A]]を[[:Category:B]]と[[:Category:C]]へ ==
  *   == Bot: (記事) [[:Category:A]]を[[:Category:B]]へ ==
  *   == Bot: (カテゴリ) [[:Category:A]]を[[:Category:B]]へ ==
  *   == Bot: [[:Category:A]]を除去 ==
- *   == Bot: [[:Category:A]]を[[:Category:B]]に複製 ==
+ * 複数の移動先（「…と…へ」）と複製（「…に複製」）は受け付けない（不受理）。
  * 本文の最初のリンク（カテゴリ・利用者ページ等を除く）を議論場所とする。
  */
 const WikitextParser = require('../parse2');
@@ -16,36 +15,75 @@ const { bareCategoryName } = require('./title');
 // 「Bot:」だけの場合の対象名前空間（QueueBotと同じく標準・Category）
 const DEFAULT_NAMESPACES = [0, 14];
 const NAMESPACES_BY_SCOPE = { '記事': [0], 'カテゴリ': [14] };
-const MAX_TO_CATEGORIES = 5;
 const NON_DISCUSSION_PREFIX = /^\s*:?\s*(?:category|カテゴリ|file|ファイル|画像|image|user|利用者|user[ _]talk|利用者[‐-]会話|special|特別)\s*:/i;
 const parser = new WikitextParser();
+
+// Bot が着手時に付ける印「{{BOTREQ|着手}} (ID: …)」。以後はこの ID で節を探す
+const START_MARK = /\{\{BOTREQ\|着手\}\} \(ID: (\d{14}-[0-9a-f]{6})\)/g;
+const startMark = id => `{{BOTREQ|着手}} (ID: ${id})`;
+
+/** 本文の最初の行（依頼文と署名）。返信が後ろに付いても変わらない */
+function requestLineOf(body) {
+    for (const line of body.split('\n')) {
+        const t = line.trim();
+        if (t) return t;
+    }
+    return '';
+}
 
 /**
  * キューページを第2レベルの節に分ける
  * 見出しの検出は parse2 に任せる（コメント・<nowiki> の中やテンプレートの中の見出しは数えない）
  * @param {string} wikitext
- * @returns {{heading: string, headingLine: string, occurrence: number, start: number, bodyStart: number, end: number, body: string}[]}
+ * @returns {{heading: string, headingLine: string, requestLine: string, start: number, bodyStart: number, end: number, body: string}[]}
  */
 function parseQueueSections(wikitext) {
     const sections = [];
-    const seen = new Map();
     for (const h of parser.parse(wikitext, { headings: true }).headings) {
         if (h.level !== 2) continue;
         const { header, content } = h.position;
-        const headingLine = wikitext.slice(header.start, header.end);
-        const occurrence = seen.get(headingLine) || 0;
-        seen.set(headingLine, occurrence + 1);
+        const body = wikitext.slice(header.end, content.end);
         sections.push({
             heading: h.title,
-            headingLine,
-            occurrence,
+            headingLine: wikitext.slice(header.start, header.end),
+            requestLine: requestLineOf(body),
             start: header.start,
             bodyStart: header.end,
             end: content.end,
-            body: wikitext.slice(header.end, content.end),
+            body,
         });
     }
     return sections;
+}
+
+/**
+ * 着手の印（ID）で節を探す。印は Bot が付けたものなので、他の節の追加・過去ログ化や
+ * 見出しの書き換えに関係なく、その節を一意に見つけられる
+ * @param {string} wikitext 最新のキューページ
+ * @param {string} id
+ * @returns {{section: object} | {error: 'missing'|'ambiguous'}}
+ */
+function findById(wikitext, id) {
+    const mark = startMark(id);
+    return single(parseQueueSections(wikitext).filter(s => s.body.includes(mark)));
+}
+
+/**
+ * 着手の前（印がまだ無いとき）に節を探す。見出し行と依頼文（本文の最初の行）の両方が同じ節だけを同じものとみなす。
+ * 着手の返信と同じ編集の中で、最新の本文に対して使う（探してから書き込むまでの間に変わることはない）
+ * @param {string} wikitext
+ * @param {{headingLine: string, requestLine: string}} target 読み込んだときの節
+ * @returns {{section: object} | {error: 'missing'|'ambiguous'}}
+ */
+function findByRequest(wikitext, target) {
+    return single(parseQueueSections(wikitext)
+        .filter(s => s.headingLine === target.headingLine && s.requestLine === target.requestLine));
+}
+
+function single(candidates) {
+    if (candidates.length === 0) return { error: 'missing' };
+    if (candidates.length > 1) return { error: 'ambiguous' };
+    return { section: candidates[0] };
 }
 
 /** 見出しが「Bot:」で始まるか（異議のある節は「Bot:」が外される） */
@@ -53,10 +91,22 @@ function isBotHeading(heading) {
     return /^Bot\s*[:：]/i.test(normalizeSpaces(heading));
 }
 
-/** 既に{{BOTREQ}}が付いている節は処理済み（または人が対応中）として扱う */
+/** 節に付いている着手の印の ID（無ければ null） */
+function startedId(section) {
+    const m = new RegExp(START_MARK.source).exec(section.body);
+    return m ? m[1] : null;
+}
+
+/**
+ * 他の誰かが対応済み（または対応中）か
+ * 着手の印（{{BOTREQ|着手}} (ID: …)）以外の {{BOTREQ}} があれば対応済みとする。
+ * 印の ID が本当にこの Bot のものか（再開してよいか）は、呼び出し側が手元の記録で確かめる
+ */
 function isHandled(section) {
-    return parser.parse(section.body, { templates: true }).templates
-        .some(t => t.type === 'template' && t.name.toLowerCase() === 'template:botreq');
+    const botreqs = parser.parse(section.body, { templates: true }).templates
+        .filter(t => t.type === 'template' && t.name.toLowerCase() === 'template:botreq').length;
+    const marks = (section.body.match(START_MARK) || []).length;
+    return botreqs > marks;
 }
 
 function normalizeSpaces(s) {
@@ -104,24 +154,21 @@ function parseCommandHeading(heading) {
     if (takeWord('除去')) {
         type = 'remove';
     } else {
-        for (;;) {
-            const link = takeLink();
-            if (!link) return { ok: false, error: '移動先のカテゴリへのリンク（[[:Category:…]]）が見つかりません' };
-            links.push(link);
-            to.push(link.name);
-            if (takeWord('と')) continue;
-            if (takeWord('へ')) { type = 'reassign'; break; }
-            if (takeWord('に複製')) { type = 'duplicate'; break; }
-            return { ok: false, error: '末尾が「へ」「に複製」「を除去」のいずれでもありません' };
-        }
+        const link = takeLink();
+        if (!link) return { ok: false, error: '移動先のカテゴリへのリンク（[[:Category:…]]）が見つかりません' };
+        links.push(link);
+        to.push(link.name);
+        // 複数の移動先（「…と…へ」）と複製（「…に複製」）は受け付けない
+        if (rest.startsWith('と')) return { ok: false, error: '移動先は1つだけ指定してください（「[[:Category:…]]と[[:Category:…]]へ」の構文は受け付けていません）' };
+        if (rest.startsWith('に複製')) return { ok: false, error: '複製（「[[:Category:…]]に複製」）は受け付けていません' };
+        if (!takeWord('へ')) return { ok: false, error: '末尾が「へ」「を除去」のいずれでもありません' };
+        type = 'reassign';
     }
     if (rest !== '') return { ok: false, error: `コマンドの後ろに余分な文字列があります（${rest}）` };
     if (links.some(l => !l.colon)) {
         return { ok: false, error: 'カテゴリへのリンクは先頭にコロンを付けて [[:Category:…]] と書いてください' };
     }
     if (!from.name || to.some(t => !t)) return { ok: false, error: 'カテゴリ名が空です' };
-    if (to.length > MAX_TO_CATEGORIES) return { ok: false, error: `移動先は${MAX_TO_CATEGORIES}件までです` };
-    if (new Set(to).size !== to.length) return { ok: false, error: '移動先に同じカテゴリが重複しています' };
     if (to.includes(from.name)) return { ok: false, error: '移動元と移動先が同じカテゴリです' };
 
     const namespaces = scope ? NAMESPACES_BY_SCOPE[scope] : DEFAULT_NAMESPACES;
@@ -142,16 +189,14 @@ function findDiscussionLink(body) {
 }
 
 /**
- * 節（見出し）の末尾に返信を挿入した本文を返す
- * 見出しの文字列と、同じ見出しの何番目か（occurrence）で節を探し直す
- * @returns {string|null} 節が見つからなければ null
+ * 節（最新の本文で探し直したもの）の末尾に返信を挿入した本文を返す
+ * @param {string} wikitext
+ * @param {{end: number}} section findById / findByRequest で wikitext から見つけた節
+ * @param {string} reply
  */
 function insertReply(wikitext, section, reply) {
-    const target = parseQueueSections(wikitext)
-        .find(s => s.headingLine === section.headingLine && s.occurrence === section.occurrence);
-    if (!target) return null;
-    const before = wikitext.slice(0, target.end).replace(/\s+$/, '');
-    const after = wikitext.slice(target.end);
+    const before = wikitext.slice(0, section.end).replace(/\s+$/, '');
+    const after = wikitext.slice(section.end);
     return `${before}\n${reply}\n${after ? `\n${after}` : ''}`;
 }
 
@@ -162,5 +207,9 @@ module.exports = {
     isHandled,
     parseCommandHeading,
     findDiscussionLink,
+    findById,
+    findByRequest,
+    startedId,
+    startMark,
     insertReply,
 };

@@ -80,16 +80,20 @@ node scripts/task-registry.js check
 
 | 見出し | 動作 | 対象名前空間 |
 | --- | --- | --- |
-| `Bot: [[:Category:A]]を[[:Category:B]]へ`（`と` で5件まで） | 再配属 | 標準・Category |
+| `Bot: [[:Category:A]]を[[:Category:B]]へ` | 再配属（移動先は1つ） | 標準・Category |
 | `Bot: (記事) …へ` / `Bot: (カテゴリ) …へ` | 再配属 | 標準のみ / Categoryのみ |
-| `Bot: [[:Category:A]]を[[:Category:B]]に複製` | 複製（Aを残す） | 標準・Category |
 | `Bot: [[:Category:A]]を除去` | 除去 | 標準・Category |
+
+複数の移動先（`…と…へ`）と複製（`…に複製`）は受け付けません（不受理として返信）。
 
 - 書き換えるのは `[[Category:A|ソートキー]]`（ソートキーは引き継ぐ）、`{{リダイレクトの所属カテゴリ}}` のカテゴリ引数、`{{画像提供依頼}}` 等の `cat` 引数。テンプレート経由でのみ所属しているページは変更せず、返信で要確認として挙げる。
 - 本文の最初のリンク（カテゴリ・利用者ページを除く）を議論場所として編集要約に入れる。無ければ不受理。
 - 移動先カテゴリが存在しない場合は不可能として返信する（カテゴリの移動・即時削除の依頼はしない）。
 - `プロジェクト:カテゴリ関連/キュー/緊急停止` の本文が `動作中` 以外なら編集しない（1ページごとに確認）。
 - 編集は `data/category-queue/operations/<ID>.jsonl` に記録し、`--rollback <ID>` で取り消せる。
+- キューページへの返信は件数だけの1行にし、ページの一覧・理由・実行ログ・依頼者は Web の `/queue/<ID>` に載せる。
+- 依頼者と依頼日時はキューページの履歴から特定し、署名と一致しなければ記録する（偽装の追跡）。
+- 編集を始める前に `{{BOTREQ|着手}} (ID: …)` を返信し、以後はこの ID で節を追跡する。緊急停止・異常終了したコマンドは同じ ID で再開し、投稿できなかった返信は次の実行で再送する。
 - 実行状況を `data/category-queue/status.json`（随時上書き）と `history.jsonl`（終わったコマンド）に書き出し、Web の `/queue` で確認できる。`run.lock/` で二重起動を防ぐ。
 
 ```sh
@@ -98,6 +102,8 @@ node dist/category-queue.js --only "原爆" --max-pages 3  # 1節・3ページ�
 node dist/category-queue.js                        # 実行して返信
 node dist/category-queue.js --rollback <ID>        # 取り消し
 npm test                                           # 解析・置換のテスト
+node scripts/queue-test-setup.js                   # test.wikipedia.org に試験用のページを作る
+node dist/category-queue.js --site test             # testwiki の試験用キューで実際に動かす
 ```
 
 ## 必要なもの

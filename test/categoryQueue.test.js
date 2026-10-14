@@ -3,20 +3,19 @@ const assert = require('node:assert/strict');
 const queue = require('../src/utils/categoryQueue/queue');
 const { applyCategoryCommand, transformList } = require('../src/utils/categoryQueue/replacer');
 const { editSummary, formatReply } = require('../src/utils/categoryQueue/report');
+const { signatureUser } = require('../src/utils/categoryQueue/requester');
 
 const apply = (text, type, from, to = []) => applyCategoryCommand(text, { type, from, to });
 
 // ==========================================
 // コマンドの解釈
 // ==========================================
-test('再配属・複製・除去の見出しを解釈する', () => {
+test('再配属・除去の見出しを解釈する', () => {
     const cases = [
         ['Bot: [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], [0, 14]],
-        ['Bot: [[:Category:Name1]]を[[:Category:Name2]]と[[:Category:Name3]]へ', 'reassign', 'Name1', ['Name2', 'Name3'], [0, 14]],
         ['Bot: (記事) [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], [0]],
         ['Bot:&nbsp;(カテゴリ) [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], [14]],
         ['Bot: [[:Category:Name1]]を除去', 'remove', 'Name1', [], [0, 14]],
-        ['Bot: [[:Category:Name1]]を[[:Category:Name2]]に複製', 'duplicate', 'Name1', ['Name2'], [0, 14]],
         ['Bot: [[:Category:日本の_橋]] を [[:カテゴリ:日本の橋梁|橋梁]] へ', 'reassign', '日本の 橋', ['日本の橋梁'], [0, 14]],
     ];
     for (const [heading, type, from, to, namespaces] of cases) {
@@ -34,14 +33,22 @@ test('不正な見出しは理由つきで不受理にする', () => {
         'Bot: [[Category:Name1]]を[[:Category:Name2]]へ',      // コロンなし
         'Bot: [[:Category:Name1]]を[[:Category:Name2]]',       // 末尾なし
         'Bot: [[:Category:Name1]]を[[:Category:Name1]]へ',      // 同じ
-        'Bot: [[:Category:A]]を[[:Category:B]]と[[:Category:B]]へ',
         'Bot: [[:Category:A]]を[[:Category:B]]へ お願いします',
-        'Bot: [[:Category:A]]を[[:Category:B]]と[[:Category:C]]と[[:Category:D]]と[[:Category:E]]と[[:Category:F]]と[[:Category:G]]へ',
     ]) {
         const r = queue.parseCommandHeading(heading);
         assert.equal(r.ok, false, heading);
         assert.ok(r.error);
     }
+});
+
+test('複数の移動先と複製の構文は受け付けない', () => {
+    const multi = queue.parseCommandHeading('Bot: [[:Category:Name1]]を[[:Category:Name2]]と[[:Category:Name3]]へ');
+    assert.equal(multi.ok, false);
+    assert.match(multi.error, /移動先は1つだけ/);
+    const dup = queue.parseCommandHeading('Bot: [[:Category:Name1]]を[[:Category:Name2]]に複製');
+    assert.equal(dup.ok, false);
+    assert.match(dup.error, /複製/);
+    assert.equal(queue.parseCommandHeading('Bot: (記事) [[:Category:Name1]]を[[:Category:Name2]]に複製').ok, false);
 });
 
 test('キューページの節を読み、処理済みと異議ありを見分ける', () => {
@@ -69,7 +76,6 @@ test('キューページの節を読み、処理済みと異議ありを見分�
 
     const replied = queue.insertReply(page, sections[0], ':{{BOTREQ|完了}} 返信');
     assert.ok(replied.includes('本文\n:{{BOTREQ|完了}} 返信\n\n== Bot: [[:Category:C]]を除去 =='));
-    assert.equal(queue.insertReply(page.replace('[[:Category:A]]', '[[:Category:Z]]'), sections[0], 'x'), null);
 });
 
 // ==========================================
@@ -87,23 +93,13 @@ test('表記ゆれ（先頭小文字・_・カテゴリ:）も対象にし、別
     assert.equal(r.text, '[[Category:Name 10]]\n[[:Category:Name 1]]');
 });
 
-test('複数の移動先と既にある移動先', () => {
-    assert.equal(
-        apply('[[Category:Name1]]\n', 'reassign', 'Name1', ['Name2', 'Name3']).text,
-        '[[Category:Name2]]\n[[Category:Name3]]\n');
+test('移動先が既にある・移動元のタグが重複している', () => {
     assert.equal(
         apply('[[Category:Name1]]\n[[Category:Name2]]\n', 'reassign', 'Name1', ['Name2']).text,
         '[[Category:Name2]]\n');
     assert.equal(
         apply('[[Category:Name1]][[Category:Name1|x]]', 'reassign', 'Name1', ['Name2']).text,
         '[[Category:Name2]]');
-});
-
-test('複製は元のカテゴリを残す', () => {
-    assert.equal(
-        apply('[[Category:Name1|k]]\n[[Category:Z]]', 'duplicate', 'Name1', ['Name2']).text,
-        '[[Category:Name1|k]]\n[[Category:Name2|k]]\n[[Category:Z]]');
-    assert.equal(apply('[[Category:Name1]][[Category:Name2]]', 'duplicate', 'Name1', ['Name2']).changed, false);
 });
 
 test('コメントとnowikiの中は書き換えない', () => {
@@ -145,10 +141,6 @@ test('リダイレクトの所属カテゴリ: 名前付き引数の再配属・
         '}}',
     ].join('\n'));
     assert.ok(removed.warnings.some(w => w.includes('redirect2')));
-
-    const multi = apply(text, 'reassign', 'Name1', ['Name2', 'Name3']);
-    assert.ok(multi.text.includes('|1-1 = Name2\n|1-2 = Name3\n|1-3 = Other\n'));
-    assert.ok(multi.text.includes('|2-1 = Name2\n|2-2 = Name3\n}}'));
 });
 
 test('リダイレクトの所属カテゴリ: 位置引数、全カテゴリ除去で呼び出しごと削除', () => {
@@ -179,9 +171,8 @@ test('画像提供依頼の cat 引数を付け替える', () => {
 
 test('transformList', () => {
     const op = (type, to = []) => ({ type, from: 'A', to });
-    assert.deepEqual(transformList(['X', 'A', 'Y'], op('reassign', ['B', 'C'])), ['X', 'B', 'C', 'Y']);
+    assert.deepEqual(transformList(['X', 'A', 'Y'], op('reassign', ['B'])), ['X', 'B', 'Y']);
     assert.deepEqual(transformList(['X', 'A', 'B'], op('reassign', ['B'])), ['X', 'B']);
-    assert.deepEqual(transformList(['A', 'Y'], op('duplicate', ['B'])), ['A', 'B', 'Y']);
     assert.deepEqual(transformList(['A', 'Y', 'a'], op('remove')), ['Y']);
     assert.equal(transformList(['X'], op('remove')), null);
 });
@@ -191,20 +182,22 @@ test('transformList', () => {
 // ==========================================
 test('編集要約と返信', () => {
     assert.equal(
-        editSummary({ type: 'reassign', from: 'A', to: ['B', 'C'] }, 'PJ:議論#A', 'ID1'),
-        'Bot: [[:Category:A]]から[[:Category:B]],[[:Category:C]]へ変更 ([[PJ:議論#A|議論場所]]) (ID: ID1)');
-    const reply = formatReply({
-        status: '完了', id: 'ID1', message: '2件の編集を行いました。',
-        result: { edited: ['a', 'b'], unchanged: ['File:c.png'], warnings: [], errors: [{ title: 'd', message: '失敗' }] },
-        notes: ['[[:Category:A]]は空になりました。'],
-    });
-    assert.equal(reply, [
-        ':{{BOTREQ|完了}} (ID: ID1) 2件の編集を行いました。',
-        ':: 直接のカテゴリ指定が見つからず変更しなかったページ（テンプレート経由などの可能性。要確認）1件: [[:File:c.png]]',
-        ':: 編集できなかったページ1件:',
-        '::* [[:d]] - 失敗',
-        ':: [[:Category:A]]は空になりました。 --~~~~',
-    ].join('\n'));
+        editSummary({ type: 'reassign', from: 'A', to: ['B'] }, 'PJ:議論#A', 'ID1'),
+        'Bot: [[:Category:A]]から[[:Category:B]]へ変更 ([[PJ:議論#A|議論場所]]) (ID: ID1)');
+    assert.equal(
+        editSummary({ type: 'remove', from: 'A', to: [] }, 'PJ:議論#A', 'ID1'),
+        'Bot: [[:Category:A]]を除去 ([[PJ:議論#A|議論場所]]) (ID: ID1)');
+    // 返信は1行。ページの一覧や理由は Web の詳細ページに載せる
+    assert.equal(
+        formatReply({ status: '完了', id: 'ID1', counts: { edited: 2, unchanged: 1, warnings: 0, errors: 1 }, notes: ['[[:Category:A]]は空になりました。'] }),
+        ':{{BOTREQ|完了}} (ID: ID1) 2件を編集しました（変更なし1件・エラー1件）。 [[:Category:A]]は空になりました。 ' +
+        '詳細は[https://nanonabot2-01.toolforge.org/queue/ID1 処理結果]を参照してください。 --~~~~');
+    assert.equal(
+        formatReply({ status: '完了', id: 'ID2', counts: { edited: 3, unchanged: 0, warnings: 0, errors: 0 } }),
+        ':{{BOTREQ|完了}} (ID: ID2) 3件を編集しました。 詳細は[https://nanonabot2-01.toolforge.org/queue/ID2 処理結果]を参照してください。 --~~~~');
+    assert.equal(
+        formatReply({ status: '不受理', id: 'ID3', message: '議論場所へのリンクがありません' }),
+        ':{{BOTREQ|不受理}} (ID: ID3) 議論場所へのリンクがありません。 詳細は[https://nanonabot2-01.toolforge.org/queue/ID3 処理結果]を参照してください。 --~~~~');
 });
 
 // ==========================================
@@ -247,6 +240,50 @@ test('実行状況の書き出しと二重起動の防止', () => {
         assert.equal(history[0].id, 'ID1');
         assert.ok(history[0].finishedAt);
         assert.equal(new QueueStatus(dir, 'normal').acquireLock(), true);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+// ==========================================
+// 依頼者の特定
+// ==========================================
+test('署名の利用者を取り出す（会話ページへのリンクは飛ばす）', () => {
+    assert.equal(signatureUser('議論は[[PJ:議論]]。--[[利用者‐会話:Bob|会話]] [[利用者:Alice_b|Alice]] 2026年'), 'Alice b');
+    assert.equal(signatureUser('[[User:alice/sub|x]]'), 'Alice');
+    assert.equal(signatureUser('署名なし'), null);
+});
+
+// ==========================================
+// コマンドごとの記録（Web の詳細ページ用）
+// ==========================================
+test('コマンドの記録と読み出し', () => {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const { CommandRecord, readCommandRecord } = require('../src/utils/categoryQueue/record');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cq-record-'));
+    try {
+        const id = '20261014000000-abcdef';
+        const rec = new CommandRecord(dir, id, { heading: 'Bot: A' }, { dryRun: false });
+        rec.setRequest({ requester: 'Alice', signer: 'Bob', signerMatches: false, requestedAt: '2026-10-13T00:00:00Z', revid: 4, traced: true });
+        rec.setCommand({ type: 'remove', from: 'A', to: [], namespaces: [0] }, 'PJ:議論', 2);
+        rec.log('info', '開始');
+        rec.page({ title: 'p1', result: 'edited', revid: 10, warnings: ['w'] });
+        rec.page({ title: 'p2', result: 'error', message: 'x' });
+        rec.finish({ status: '完了', notes: ['n'] });
+
+        const { record, pages } = readCommandRecord(dir, id);
+        assert.equal(record.state, 'done');
+        assert.equal(record.status, '完了');
+        assert.deepEqual(record.counts, { edited: 1, unchanged: 0, warnings: 1, errors: 1 });
+        assert.equal(record.request.requester, 'Alice');
+        assert.deepEqual(record.log.map(l => l.message), ['開始']);
+        assert.deepEqual(pages.map(p => p.title), ['p1', 'p2']);
+        assert.ok(!('log' in rec.summary()));
+        // ID の形でないものはファイルを開かない
+        assert.equal(readCommandRecord(dir, '../status'), null);
+        assert.equal(readCommandRecord(dir, '20261014000000-000000'), null);
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }

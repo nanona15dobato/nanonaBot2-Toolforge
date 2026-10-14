@@ -2,7 +2,8 @@
  * カテゴリキュー: 編集要約とキューページへの返信文
  */
 
-const MAX_LISTED_PAGES = 30;
+// nanonaBot2 Web（Toolforge の webservice）
+const WEB_BASE = 'https://nanonabot2-01.toolforge.org';
 
 const catLink = name => `[[:Category:${name}]]`;
 
@@ -16,45 +17,52 @@ function editSummary(command, discussionLink, id) {
     const to = command.to.map(catLink).join(',');
     const body = {
         reassign: `${catLink(command.from)}から${to}へ変更`,
-        duplicate: `${catLink(command.from)}を${to}へ複製`,
         remove: `${catLink(command.from)}を除去`,
     }[command.type];
     return `Bot: ${body} ([[${discussionLink}|議論場所]]) (ID: ${id})`;
 }
 
-function pageList(titles) {
-    const shown = titles.slice(0, MAX_LISTED_PAGES).map(t => `[[:${t}]]`).join('、');
-    const more = titles.length > MAX_LISTED_PAGES ? ` ほか${titles.length - MAX_LISTED_PAGES}件` : '';
-    return shown + more;
+/** コマンドの詳細ページ（nanonaBot2 Web）の URL */
+function detailUrl(id) {
+    return `${WEB_BASE}/queue/${encodeURIComponent(id)}`;
+}
+
+/** 「12件を編集しました（変更なし3件・要確認1件・エラー1件）。」 */
+function countsText(counts) {
+    const extra = [
+        counts.unchanged ? `変更なし${counts.unchanged}件` : null,
+        counts.warnings ? `要確認${counts.warnings}件` : null,
+        counts.errors ? `エラー${counts.errors}件` : null,
+    ].filter(Boolean);
+    return `${counts.edited}件を編集しました${extra.length ? `（${extra.join('・')}）` : ''}。`;
 }
 
 /**
- * キューページへの返信（署名つき）
+ * キューページへの返信（署名つき、1行）
+ * ページの一覧や理由は返信に書かず、Web の詳細ページに載せる（キューページを長くしないため）。
  * @param {object} p
  * @param {'完了'|'不受理'|'不可能'|'中止'} p.status {{BOTREQ}}の引数
- * @param {string} p.message
+ * @param {string} [p.message] 不受理・中止などの理由
  * @param {string} [p.id]
- * @param {object} [p.result] executeCommand の結果
- * @param {string[]} [p.notes] 追記事項
+ * @param {{edited: number, unchanged: number, warnings: number, errors: number}} [p.counts] 編集した件数（完了・途中で中止したとき）
+ * @param {string[]} [p.notes] 追記事項（「Category:Name1 は空になりました。」など）
  */
-function formatReply({ status, message, id, result, notes = [] }) {
-    const lines = [`:{{BOTREQ|${status}}}${id ? ` (ID: ${id})` : ''} ${message}`];
-    if (result) {
-        if (result.unchanged.length > 0) {
-            lines.push(`:: 直接のカテゴリ指定が見つからず変更しなかったページ（テンプレート経由などの可能性。要確認）${result.unchanged.length}件: ${pageList(result.unchanged)}`);
-        }
-        if (result.warnings.length > 0) {
-            lines.push(`:: 編集はしたが確認が必要なページ${result.warnings.length}件:`);
-            for (const w of result.warnings.slice(0, MAX_LISTED_PAGES)) lines.push(`::* [[:${w.title}]] - ${w.messages.join(' / ')}`);
-        }
-        if (result.errors.length > 0) {
-            lines.push(`:: 編集できなかったページ${result.errors.length}件:`);
-            for (const e of result.errors.slice(0, MAX_LISTED_PAGES)) lines.push(`::* [[:${e.title}]] - ${e.message}`);
-        }
-    }
-    for (const note of notes) lines.push(`:: ${note}`);
-    lines[lines.length - 1] += ' --~~~~';
-    return lines.join('\n');
+function formatReply({ status, message, id, counts, notes = [] }) {
+    const parts = [`:{{BOTREQ|${status}}}`];
+    if (id) parts.push(`(ID: ${id})`);
+    if (message) parts.push(/[。.]$/.test(message) ? message : `${message}。`);
+    if (counts) parts.push(countsText(counts));
+    parts.push(...notes);
+    if (id) parts.push(`詳細は[${detailUrl(id)} 処理結果]を参照してください。`);
+    return `${parts.join(' ')} --~~~~`;
 }
 
-module.exports = { editSummary, formatReply, catLink };
+/**
+ * 着手の返信。印「{{BOTREQ|着手}} (ID: …)」を付け、以後はこの ID で節を探す
+ * （queue.startMark と同じ形。変えるときは queue.js の START_MARK も直す）
+ */
+function formatStart(id) {
+    return `:{{BOTREQ|着手}} (ID: ${id}) 処理を始めました。進み具合は[${detailUrl(id)} 処理状況]で確認できます。 --~~~~`;
+}
+
+module.exports = { editSummary, formatReply, formatStart, countsText, detailUrl, catLink };

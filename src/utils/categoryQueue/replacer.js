@@ -1,7 +1,7 @@
 /**
  * カテゴリキュー: ページ本文（wikitext）のカテゴリ付け替え
  *
- * 1コマンド分の操作（再配属 / 複製 / 除去）を、次の3か所に適用する。
+ * 1コマンド分の操作（再配属 / 除去）を、次の3か所に適用する。
  *   1. カテゴリタグ           [[Category:X|ソートキー]]
  *   2. {{リダイレクトの所属カテゴリ}}  |1-1 = X / |redirect2 … |2-1 = X / 位置引数 |X
  *   3. {{画像提供依頼}} など    |cat = X（カテゴリ「Xの画像提供依頼」を作るテンプレート）
@@ -49,9 +49,6 @@ function transformList(values, op) {
     if (index === -1) return null;
     const missing = op.to.filter(t => !norm.includes(t));
 
-    if (op.type === 'duplicate') {
-        return [...values.slice(0, index + 1), ...missing, ...values.slice(index + 1)];
-    }
     const kept = values.filter((_, i) => norm[i] !== op.from);
     if (op.type === 'remove') return kept;
     // reassign: 最初の from の位置に、まだ無い移動先を入れる
@@ -77,11 +74,6 @@ function replaceCategoryTags(text, op) {
         const makeTags = () => missing.map(t => `[[Category:${t}${c.sortKeyRaw !== null ? `|${c.sortKeyRaw}` : ''}]]`);
         const atLineEnd = /^[ \t]*(?:\n|$)/.test(text.slice(end));
 
-        if (op.type === 'duplicate') {
-            if (i > 0 || missing.length === 0) return;
-            edits.push({ start: end, end, replacement: makeTags().map(t => (atLineEnd ? '\n' : '') + t).join('') });
-            return;
-        }
         if (op.type === 'reassign' && i === 0 && missing.length > 0) {
             edits.push({ start, end, replacement: makeTags().join(atLineEnd ? '\n' : '') });
             return;
@@ -232,7 +224,7 @@ function replaceInImageRequestTemplates(text, op, warnings) {
 
 /**
  * @param {string} wikitext
- * @param {{type: 'reassign'|'duplicate'|'remove', from: string, to: string[]}} command
+ * @param {{type: 'reassign'|'remove', from: string, to: string[]}} command 移動先 to は再配属で1件
  *        from/to は "Category:" の有無を問わない
  * @returns {{text: string, changed: boolean, warnings: string[]}}
  */

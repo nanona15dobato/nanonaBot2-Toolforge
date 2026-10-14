@@ -11,6 +11,8 @@
  *   node category-queue.js --max-pages 5   1コマンドあたりの対象ページ数を制限する（試験用。返信はしない）
  *   node category-queue.js --no-report     キューページに返信しない
  *   node category-queue.js --rollback <ID> 指定IDのコマンドで行った編集を取り消す
+ *   node category-queue.js --site test     test.wikipedia.org の試験用キューで動かす（scripts/queue-test-setup.js で用意）
+ *   node category-queue.js --queue-page <ページ名> --stop-page <ページ名>  キューページ・緊急停止ページを変える
  */
 const fs = require('fs');
 const path = require('path');
@@ -22,25 +24,66 @@ const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { logger } = require('./utils/logger');
 const queue = require('./utils/categoryQueue/queue');
 const { applyCategoryCommand, REDIRECT_CATEGORY_TEMPLATES, IMAGE_REQUEST_SUFFIX } = require('./utils/categoryQueue/replacer');
-const { editSummary, formatReply, catLink } = require('./utils/categoryQueue/report');
+const { editSummary, formatReply, formatStart, catLink } = require('./utils/categoryQueue/report');
+const { CommandRecord, readCommandRecord, reopenCommandRecord } = require('./utils/categoryQueue/record');
+const { identifyRequester } = require('./utils/categoryQueue/requester');
 const { QueueStatus } = require('./utils/categoryQueue/status');
 const taskId = 'w-ja-nn5';
 const nnversion = '__FILE_HASH__';
 
-const QUEUE_PAGE = 'プロジェクト:カテゴリ関連/キュー';
+/**
+ * 動かすウィキ（--site）
+ * - ja:   本番。日本語版ウィキペディアのキュー
+ * - test: 試験。test.wikipedia.org の利用者ページにキューを置き、試験用のカテゴリ・記事で実際に編集する
+ *         （scripts/queue-test-setup.js で用意する。Bot フラグが無いので assert=bot は付けず、メタの稼働スイッチも見ない）
+ * どちらも --queue-page / --stop-page でページを変えられる（例: jawp の利用者サンドボックスにキューを置いて --dry-run）
+ */
+const SITES = {
+    ja: {
+        apiUrl: 'https://ja.wikipedia.org/w/api.php',
+        queuePage: 'プロジェクト:カテゴリ関連/キュー',
+        stopPage: 'プロジェクト:カテゴリ関連/キュー/緊急停止',
+        dataDir: 'data/category-queue',
+        assertBot: true,
+        taskSwitch: true,
+    },
+    test: {
+        apiUrl: 'https://test.wikipedia.org/w/api.php',
+        queuePage: 'User:NanonaBot2/カテゴリキュー',
+        stopPage: 'User:NanonaBot2/カテゴリキュー/緊急停止',
+        dataDir: 'data/category-queue-test',
+        assertBot: false,
+        taskSwitch: false,
+    },
+};
+
+/** --site / --queue-page / --stop-page を、Bot を作る前に読む */
+function resolveSite(argv) {
+    const value = name => {
+        const i = argv.indexOf(name);
+        return i === -1 ? null : argv[i + 1];
+    };
+    const name = value('--site') || 'ja';
+    if (!SITES[name]) throw new Error(`--site は ${Object.keys(SITES).join(' / ')} のどれかです`);
+    return { name, ...SITES[name], queuePage: value('--queue-page') || SITES[name].queuePage, stopPage: value('--stop-page') || SITES[name].stopPage };
+}
+
+const SITE = resolveSite(process.argv.slice(2));
+const QUEUE_PAGE = SITE.queuePage;
 // 本文（コメントを除く）が「動作中」のときだけ編集する
-const EMERGENCY_STOP_PAGE = 'プロジェクト:カテゴリ関連/キュー/緊急停止';
-const DATA_DIR = path.join(__dirname, 'data/category-queue');
+const EMERGENCY_STOP_PAGE = SITE.stopPage;
+const DATA_DIR = path.join(__dirname, SITE.dataDir);
 const EDIT_CONFIG = { conflictRetries: 2, suppressNochangeWarning: true };
+// 編集中にキューページを読み直し、節の見出しが変わっていないか確かめる間隔
+// （環境変数 CATEGORY_QUEUE_CHECK_MS で変えられる。試験用）
+const SECTION_CHECK_INTERVAL_MS = Number(process.env.CATEGORY_QUEUE_CHECK_MS) || 2 * 60 * 1000;
 
 const bot = applyEditThrottle(new Mwn({
-    apiUrl: 'https://ja.wikipedia.org/w/api.php',
+    apiUrl: SITE.apiUrl,
     username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
     password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
     userAgent: `nanonaBot2/CategoryQueue [${nnversion}] (Toolforge)`,
-    defaultParams: {
-        assert: 'bot'
-    }
+    defaultParams: SITE.assertBot ? { assert: 'bot' } : {},
 }), { priority: 'low' });
 
 // ==========================================
@@ -55,6 +98,7 @@ function parseArgs(argv) {
         else if (a === '--only') opts.only = argv[++i];
         else if (a === '--max-pages') opts.maxPages = Number(argv[++i]);
         else if (a === '--rollback') opts.rollback = argv[++i];
+        else if (a === '--site' || a === '--queue-page' || a === '--stop-page') i++; // resolveSite で読み済み
         else throw new Error(`不明な引数です: ${a}`);
     }
     if (!(opts.maxPages > 0)) throw new Error('--max-pages には1以上の数を指定してください');
@@ -152,7 +196,10 @@ async function listTargets(command) {
             for (const m of res.query?.search || []) titles.set(m.title, true);
         }
     }
-    return [...titles.keys()];
+    // キューページ・緊急停止ページは対象にしない（見出しにコロンなしの [[Category:…]] を書かれると、
+    // キューページ自体がそのカテゴリに入る。書き換えると依頼の見出しが変わってしまう）
+    const own = new Set([QUEUE_PAGE, EMERGENCY_STOP_PAGE].map(t => t.replace(/_/g, ' ')));
+    return [...titles.keys()].filter(t => !own.has(t.replace(/_/g, ' ')));
 }
 
 // ==========================================
@@ -190,10 +237,26 @@ async function processPage(title, command, ctx) {
 }
 
 /**
- * @returns {Promise<{status: string, message: string, id?: string, result?: object, notes?: string[], stopped?: boolean, record?: object}>}
+ * 1節を実行する。経過と結果は record（コマンドごとの記録、Web の詳細画面）に残す
+ *
+ * 編集を始める前に、節に着手の印「{{BOTREQ|着手}} (ID: …)」を返信する。以後はこの ID で節を探すので、
+ * 他の節の追加・過去ログ化や見出しの書き換えがあっても、返信先を取り違えない。
+ * 返信しない実行（dry-run など）では印を付けない。
+ *
+ * @param {object} section 読み込んだときの節
+ * @param {object} opts
+ * @param {CommandRecord} record
+ * @param {boolean} resumed 着手済みのコマンドの再開か
+ * @returns {Promise<{status: string, message?: string, counts?: object, notes?: string[], stopped?: boolean, skipped?: boolean}>}
  */
-async function executeSection(section, opts) {
+async function executeSection(section, opts, record, resumed) {
     const { status } = opts;
+    const id = record.id;
+    const log = (level, message, isPublic = false) => {
+        record.log(level, message);
+        logger[level === 'warning' ? 'warning' : 'info'](taskId, `[${id}] ${message}`, isPublic && !opts.dryRun);
+    };
+
     const parsed = queue.parseCommandHeading(section.heading);
     if (!parsed.ok) return { status: '不受理', message: parsed.error };
     const command = parsed.command;
@@ -212,48 +275,76 @@ async function executeSection(section, opts) {
         }
     }
 
+    if (resumed) {
+        log('info', '着手済みのコマンドを再開します', true);
+    } else if (opts.report) {
+        const start = await postStart(section, id);
+        if (!start.ok) return { status: '見送り', message: start.reason, skipped: true };
+        record.markStarted();
+    }
+
+    // 依頼者と依頼日時（キューページの履歴から。失敗しても処理は続ける）
+    if (!record.data.request) {
+        try {
+            const request = await identifyRequester(bot, QUEUE_PAGE, section);
+            record.setRequest(request);
+            if (!request.traced) log('warning', '履歴から依頼者を特定できませんでした（古い版までさかのぼれない）');
+            else if (request.signerMatches === false) log('warning', `署名（${request.signer}）と見出しを書き込んだ利用者（${request.requester}）が一致しません`);
+        } catch (e) {
+            log('warning', `依頼者を調べられませんでした: ${e.message}`);
+        }
+    }
+
     const targets = (await listTargets(command)).slice(0, opts.maxPages);
-    if (targets.length === 0) {
+    const c = record.data.counts;
+    // 再開のときは、前回までに処理したページの数も対象に含める（処理済みのページは移動元から外れている）
+    record.setCommand(command, discussionLink, c.edited + c.unchanged + c.errors + targets.length);
+    if (targets.length === 0 && !resumed) {
         return { status: '不可能', message: 'カテゴリに操作対象となる所属記事または所属カテゴリがありませんでした' };
     }
 
-    const id = newCommandId();
     const ctx = { id, dryRun: opts.dryRun, botUser: opts.botUser, summary: editSummary(command, discussionLink, id) };
-    const startedAt = new Date().toISOString();
-    appendJsonl(path.join(DATA_DIR, 'commands.jsonl'), {
-        id, heading: section.heading, command, discussionLink, dryRun: opts.dryRun, startedAt, targets: targets.length,
-    });
-    status.commandStart({ id, command, discussionLink, total: targets.length });
-    logger.info(taskId, `[${id}] ${section.heading}: 対象${targets.length}件${opts.dryRun ? '（dry-run）' : ''}`, !opts.dryRun);
+    status.commandStart({ id, command, discussionLink, total: targets.length, request: record.data.request });
+    log('info', `${section.heading}: 対象${targets.length}件${opts.dryRun ? '（dry-run）' : ''}`, true);
 
-    const result = { edited: [], unchanged: [], warnings: [], errors: [] };
     let stopped = false;
+    let aborted = null;
+    let lastCheck = Date.now();
+    let missingLogged = false;
     for (const title of targets) {
         if (!opts.dryRun && await isEmergencyStopped()) {
             stopped = true;
             break;
         }
+        // 着手の印のある節を定期的に確かめる。見出しの変更（「Bot:」を外す異議を含む）や他の作業者の対応があれば中止する。
+        // 節が過去ログ化されただけなら依頼は有効なので続け、返信できなければ記録する
+        if (record.data.started && Date.now() - lastCheck >= SECTION_CHECK_INTERVAL_MS) {
+            lastCheck = Date.now();
+            const check = await checkStartedSection(section, id);
+            if (check.missing) {
+                if (!missingLogged) log('warning', `${check.reason}。処理は続けます`);
+                missingLogged = true;
+            } else if (!check.ok) {
+                aborted = check.reason;
+                break;
+            }
+        }
         status.pageStart(title);
+        let ev;
         try {
             const r = await processPage(title, command, ctx);
-            (r.changed ? result.edited : result.unchanged).push(title);
-            if (r.warnings.length > 0) result.warnings.push({ title, messages: r.warnings });
-            status.pageDone({ title, result: r.changed ? 'edited' : 'unchanged', warnings: r.warnings, revid: r.revid, oldrevid: r.oldrevid });
+            ev = { title, result: r.changed ? 'edited' : 'unchanged', warnings: r.warnings, revid: r.revid, oldrevid: r.oldrevid };
         } catch (e) {
-            result.errors.push({ title, message: e.message || String(e) });
-            logger.warning(taskId, `[${id}] ${title}: ${e.message || e}`);
-            status.pageDone({ title, result: 'error', message: e.message || String(e) });
+            ev = { title, result: 'error', message: e.message || String(e) };
+            log('warning', `${title}: ${ev.message}`);
         }
+        record.page(ev);
+        status.pageDone(ev);
     }
 
-    const summaryLine = `編集${result.edited.length}件 / 変更なし${result.unchanged.length}件 / エラー${result.errors.length}件`;
-    logger.info(taskId, `[${id}] ${stopped ? '緊急停止' : '終了'}: ${summaryLine}`, !opts.dryRun);
-    const record = {
-        id, heading: section.heading, type: command.type, from: command.from, to: command.to, discussionLink,
-        dryRun: opts.dryRun, startedAt, total: targets.length,
-        edited: result.edited.length, unchanged: result.unchanged.length, warnings: result.warnings.length, errors: result.errors.length,
-    };
-    if (stopped) return { stopped: true, id, result, record: { ...record, status: '緊急停止' } };
+    log(aborted ? 'warning' : 'info', `${stopped ? '緊急停止' : aborted ? `中止（${aborted}）` : '終了'}: 編集${c.edited}件 / 変更なし${c.unchanged}件 / 要確認${c.warnings}件 / エラー${c.errors}件`, true);
+    if (stopped) return { stopped: true };
+    if (aborted) return { status: '中止', message: `実行中に節が変わったため中止しました（${aborted}）`, counts: { ...c } };
 
     const notes = [];
     if (command.type === 'reassign' && !opts.dryRun) {
@@ -261,65 +352,169 @@ async function executeSection(section, opts) {
         if (info.size === 0) notes.push(`${catLink(command.from)}は空になりました。`);
         else notes.push(`${catLink(command.from)}にはまだ${info.size}件が所属しています。`);
     }
-    return {
-        status: '完了',
-        id,
-        message: `${result.edited.length}件の編集を行いました。`,
-        result,
-        notes,
-        record: { ...record, status: '完了' },
-    };
+    return { status: '完了', counts: { ...c }, notes };
 }
 
-async function postReply(section, reply) {
+async function readQueuePage() {
+    const page = await bot.read(QUEUE_PAGE);
+    const content = page?.revisions?.[0]?.content;
+    if (typeof content !== 'string') throw new Error(`${QUEUE_PAGE} を取得できませんでした`);
+    return content;
+}
+
+const headingSummary = heading => heading.replace(/\[\[:?([^\]|]*)(?:\|[^\]]*)?\]\]/g, '$1');
+
+/**
+ * 着手の印を返信する。最新版で節を（見出し行と依頼文で）探し、まだ誰も対応していないことを確かめて、
+ * 同じ編集で書き込む（間にキューページが変われば編集競合になり、最新版でやり直す）
+ * @returns {Promise<{ok: true} | {ok: false, reason: string}>}
+ */
+async function postStart(section, id) {
+    let reason = null;
     const res = await bot.edit(QUEUE_PAGE, rev => {
-        const text = queue.insertReply(rev.content, section, reply);
-        if (text === null) throw new Error(`節「${section.heading}」が見つかりません（除去・過去ログ化された可能性）`);
-        return { text, summary: `Bot: /* ${section.heading.replace(/\[\[:?([^\]|]*)(?:\|[^\]]*)?\]\]/g, '$1')} */ キューの処理結果`, nocreate: true };
+        reason = null;
+        const found = queue.findByRequest(rev.content, section);
+        if (found.error === 'missing') reason = '節が見つかりません（見出しの変更・過去ログ化・除去の可能性）';
+        else if (found.error === 'ambiguous') reason = '同じ見出しと依頼文の節が複数あり、どれか特定できません';
+        else if (queue.isHandled(found.section) || queue.startedId(found.section)) reason = '他の作業者が{{BOTREQ}}を付けました';
+        if (reason) return null;
+        return {
+            text: queue.insertReply(rev.content, found.section, formatStart(id)),
+            summary: `Bot: /* ${headingSummary(section.heading)} */ キューの処理に着手`,
+            nocreate: true,
+        };
+    }, { ...EDIT_CONFIG });
+    if (reason) return { ok: false, reason };
+    if (res?.result !== 'Success') throw new Error(`着手の返信を保存できませんでした (${res?.result})`);
+    return { ok: true };
+}
+
+/**
+ * 着手済みの節を ID で探し、まだ続けてよいか確かめる
+ * @returns {Promise<{ok: true} | {ok: false, reason: string, missing?: boolean}>}
+ */
+async function checkStartedSection(section, id) {
+    const found = queue.findById(await readQueuePage(), id);
+    if (found.error === 'missing') return { ok: false, missing: true, reason: '節が見つかりません（過去ログ化・除去された可能性）' };
+    if (found.error === 'ambiguous') return { ok: false, reason: '同じ ID の着手の印が複数あります' };
+    if (found.section.headingLine !== section.headingLine) return { ok: false, reason: `見出しが変更されました（現在: ${found.section.heading}）` };
+    if (queue.isHandled(found.section)) return { ok: false, reason: '他の作業者が{{BOTREQ}}を付けました' };
+    return { ok: true };
+}
+
+/**
+ * 結果を返信する。着手済みなら ID で、そうでなければ（不受理・不可能など）見出し行と依頼文で節を探す
+ */
+async function postReply(section, id, started, reply) {
+    const res = await bot.edit(QUEUE_PAGE, rev => {
+        const found = started ? queue.findById(rev.content, id) : queue.findByRequest(rev.content, section);
+        if (found.error) throw new Error('返信先の節が見つかりません（過去ログ化・除去された、または特定できない）');
+        return { text: queue.insertReply(rev.content, found.section, reply), summary: `Bot: /* ${headingSummary(section.heading)} */ キューの処理結果`, nocreate: true };
     }, { ...EDIT_CONFIG });
     if (res?.result !== 'Success') throw new Error(`返信を保存できませんでした (${res?.result})`);
+}
+
+/** 返信して、結果（投稿できたか・できなかった理由）を記録に残す */
+async function replyAndRecord(section, record, outcome, opts) {
+    const reply = formatReply(outcome);
+    if (!opts.report) {
+        console.log(`--- 返信（未投稿）: ${section.heading}\n${reply}\n`);
+        record.setReply(reply, false, '返信しない設定で実行した（dry-run など）');
+        return;
+    }
+    try {
+        await postReply(section, record.id, record.data.started, reply);
+        record.setReply(reply, true);
+    } catch (e) {
+        // 返信できなくても編集は済んでいる。返信文を残し、次の実行で再送する（Web にも出す）
+        logger.error(taskId, `[${record.id}] 返信に失敗: ${section.heading}: ${e.message}`, false, { stack: e.stack });
+        record.log('error', `キューページに返信できませんでした: ${e.message}`);
+        record.setReply(reply, false, e.message);
+    }
+}
+
+/**
+ * 処理する節を選ぶ
+ * - {{BOTREQ}} が無い節 → 新しく実行する
+ * - この Bot の着手の印だけがあり、手元の記録が終わっていない（緊急停止・異常終了）→ 同じ ID で再開する
+ * - 着手の印があり、記録は終わっているが返信を投稿できていない → 返信だけ再送する
+ * - それ以外（他の作業者の {{BOTREQ}}、手元に記録の無い印）→ 何もしない
+ */
+function selectWork(content, opts) {
+    const work = [];
+    for (const s of queue.parseQueueSections(content)) {
+        if (!queue.isBotHeading(s.heading) || queue.isHandled(s)) continue;
+        if (opts.only && !s.heading.includes(opts.only)) continue;
+        const id = queue.startedId(s);
+        if (!id) {
+            work.push({ kind: 'new', section: s });
+            continue;
+        }
+        const found = readCommandRecord(DATA_DIR, id);
+        if (!found) continue;
+        const r = found.record;
+        if (r.state !== 'done') work.push({ kind: 'resume', section: s, id });
+        else if (r.reply && !r.reply.posted && opts.report) work.push({ kind: 'resend', section: s, id });
+    }
+    return work;
 }
 
 /** @returns {Promise<string>} 終わり方（実行状況に出す） */
 async function runQueue(opts) {
     const { status } = opts;
-    const page = await bot.read(QUEUE_PAGE);
-    const content = page?.revisions?.[0]?.content;
-    if (typeof content !== 'string') throw new Error(`${QUEUE_PAGE} を取得できませんでした`);
+    const work = selectWork(await readQueuePage(), opts);
+    logger.info(taskId, `処理するキュー: ${work.length}件（新規${work.filter(w => w.kind === 'new').length}・再開${work.filter(w => w.kind === 'resume').length}・返信の再送${work.filter(w => w.kind === 'resend').length}）`);
+    status.setSections(work.map(w => w.section));
+    if (work.length === 0) return '未処理のキューなし';
 
-    const sections = queue.parseQueueSections(content)
-        .filter(s => queue.isBotHeading(s.heading))
-        .filter(s => !queue.isHandled(s))
-        .filter(s => !opts.only || s.heading.includes(opts.only));
-    logger.info(taskId, `未処理のキュー: ${sections.length}件`);
-    status.setSections(sections);
-    if (sections.length === 0) return '未処理のキューなし';
-
-    for (const [index, section] of sections.entries()) {
+    for (const [index, { kind, section, id }] of work.entries()) {
         status.sectionStart(index);
-        let outcome;
-        try {
-            outcome = await executeSection(section, opts);
-        } catch (e) {
-            logger.error(taskId, `節「${section.heading}」の処理中にエラー: ${e.message}`, false, { stack: e.stack });
-            outcome = { status: '中止', message: 'Botの内部エラーにより処理を中止しました。運用者が確認します。' };
-        }
-        status.sectionEnd(index, outcome, outcome.record);
-        if (outcome.stopped) {
-            logger.warning(taskId, '緊急停止しました。残りのキューは次回処理します。', true);
-            return '緊急停止';
-        }
 
-        const reply = formatReply(outcome);
-        if (!opts.report) {
-            console.log(`--- 返信（未投稿）: ${section.heading}\n${reply}\n`);
+        if (kind === 'resend') {
+            // 開き直すと状態が「実行中」になるので、終わったときの状態を先に読んでおく
+            const done = readCommandRecord(DATA_DIR, id).record;
+            const record = reopenCommandRecord(DATA_DIR, id, opts);
+            try {
+                await postReply(section, id, true, done.reply.text);
+                record.setReply(done.reply.text, true);
+                record.log('info', '返信を再送しました');
+            } catch (e) {
+                record.log('error', `返信の再送に失敗しました: ${e.message}`);
+                record.setReply(done.reply.text, false, e.message);
+            }
+            record.finish({ status: done.status, message: done.message, notes: done.notes });
+            status.sectionEnd(index, { status: done.status, id, message: '返信の再送' }, record.summary());
             continue;
         }
+
+        // 不受理・不可能も含め、処理した節には ID を振って記録する（再開なら同じ ID の記録を開く）
+        const resumed = kind === 'resume';
+        const record = resumed ? reopenCommandRecord(DATA_DIR, id, opts) : new CommandRecord(DATA_DIR, newCommandId(), section, opts);
+        let outcome;
         try {
-            await postReply(section, reply);
+            outcome = await executeSection(section, opts, record, resumed);
         } catch (e) {
-            logger.error(taskId, `返信に失敗: ${section.heading}: ${e.message}`, false, { stack: e.stack });
+            logger.error(taskId, `節「${section.heading}」の処理中にエラー: ${e.message}`, false, { stack: e.stack });
+            record.log('error', `内部エラー: ${e.message}`);
+            outcome = { status: '中止', message: 'Botの内部エラーにより処理を中止しました。運用者が確認します' };
         }
+        outcome.id = record.id;
+
+        if (outcome.stopped) {
+            record.finish(outcome);
+            status.sectionEnd(index, outcome, record.summary());
+            logger.warning(taskId, '緊急停止しました。着手済みの節は次回同じ ID で再開します。', true);
+            return '緊急停止';
+        }
+        if (outcome.skipped) {
+            // 着手する直前に節が変わっていた（過去ログ化・見出しの変更・他の作業者の対応）。返信しない
+            logger.warning(taskId, `[${record.id}] 見送り: ${section.heading}: ${outcome.message}`);
+            record.log('warning', `実行を見送りました: ${outcome.message}`);
+        } else {
+            await replyAndRecord(section, record, outcome, opts);
+        }
+        record.finish(outcome);
+        status.sectionEnd(index, outcome, record.summary());
     }
     return '完了';
 }
@@ -375,7 +570,9 @@ async function rollback(id, opts) {
 // ==========================================
 (async () => {
     const opts = parseArgs(process.argv.slice(2));
-    if (!opts.dryRun) await checkTaskStatusAndExit(taskId);
+    // 稼働スイッチ（メタ）は本番の運用のためのもの。試験用のウィキでは見ない
+    if (!opts.dryRun && SITE.taskSwitch) await checkTaskStatusAndExit(taskId);
+    logger.info(taskId, `対象: ${SITE.name}（${new URL(SITE.apiUrl).hostname}） キュー: ${QUEUE_PAGE}`);
 
     const status = new QueueStatus(DATA_DIR, opts.rollback ? 'rollback' : opts.dryRun ? 'dry-run' : 'normal');
     if (!status.acquireLock()) {

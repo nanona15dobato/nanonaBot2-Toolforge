@@ -106,7 +106,7 @@ data/edit-throttle/<ウィキのホスト名>/
 | --- | --- | --- |
 | `data/lastTaskData.json` | getTasks.js | 前回の稼働スイッチ |
 | `data/edit-throttle/` | editThrottle.js | 編集間隔制御 |
-| `data/category-queue/` | category-queue.js | 実行状況・履歴・編集記録（[category-queue.md](category-queue.md#8-記録と取り消し)） |
+| `data/category-queue/` | category-queue.js | 実行状況・コマンドごとの記録（依頼者・実行ログ・ページの結果）・履歴・編集記録（[category-queue.md](category-queue.md#8-記録と取り消し)） |
 
 ## テスト
 

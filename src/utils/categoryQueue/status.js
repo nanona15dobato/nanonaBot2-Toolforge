@@ -94,7 +94,7 @@ class QueueStatus {
     }
 
     /** コマンドが受理され、編集を始める */
-    commandStart({ id, command, discussionLink, total }) {
+    commandStart({ id, command, discussionLink, total, request = null }) {
         Object.assign(this.data.current, {
             id,
             phase: '編集中',
@@ -103,6 +103,7 @@ class QueueStatus {
             to: command.to,
             namespaces: command.namespaces,
             discussionLink,
+            request,
             total,
             done: 0,
             edited: 0,
