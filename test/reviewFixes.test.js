@@ -99,3 +99,37 @@ test('履歴は終わったコマンドだけを書く（緊急停止で中断�
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('古い印の取り直し: 他の実行が先に取り直した新しい印は消さない', () => {
+    const dir = tmp();
+    const lockDir = path.join(dir, 'run.lock');
+    const makeStale = owner => {
+        fs.mkdirSync(lockDir);
+        fs.writeFileSync(path.join(lockDir, 'owner'), owner);
+        const old = new Date(Date.now() - 60 * 60 * 1000);
+        fs.utimesSync(lockDir, old, old);
+    };
+    try {
+        // 古い印は取り直せる
+        makeStale('OLD');
+        const c = new QueueStatus(dir, 'normal');
+        assert.equal(c.acquireLock(), true);
+        assert.equal(c.ownsLock(), true);
+        c.releaseLock();
+
+        // A と B が同じ古い印（札 OLD）を見た。B が先に取り直して新しい印を作った後で、A が片付けようとする
+        makeStale('OLD');
+        const a = new QueueStatus(dir, 'normal');
+        const b = new QueueStatus(dir, 'normal');
+        const observedByA = a.readLockOwner(lockDir);
+        assert.equal(b.acquireLock(), true);
+        assert.equal(a.reclaimStaleLock(observedByA), false); // B の印を移しても札が違うので元に戻す
+        assert.equal(b.ownsLock(), true);
+        assert.equal(b.lockLost(), false);
+        assert.equal(a.acquireLock(), false); // B の印は新しいので取れない
+        assert.deepEqual(fs.readdirSync(dir).filter(n => n.includes('.stale-')), []); // 移した跡も残らない
+        b.releaseLock();
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});

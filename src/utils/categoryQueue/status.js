@@ -49,16 +49,16 @@ class QueueStatus {
     }
 
     /** 実行中の印を取る。他の実行が動いていれば false */
-    acquireLock() {
+    acquireLock(retries = 2) {
         try {
             fs.mkdirSync(this.lockDir);
         } catch (e) {
             if (e.code !== 'EEXIST') throw e;
+            const observed = this.readLockOwner(this.lockDir);
             const st = fs.statSync(this.lockDir, { throwIfNoEntry: false });
-            if (st && Date.now() - st.mtimeMs > STALE_LOCK_MS) {
-                fs.rmSync(this.lockDir, { recursive: true, force: true });
-                return this.acquireLock();
-            }
+            if (!st || Date.now() - st.mtimeMs <= STALE_LOCK_MS) return false;
+            // 古い印を取り直せたら（または他の実行が先に片付けたら）もう一度取りにいく
+            if (retries > 0 && this.reclaimStaleLock(observed)) return this.acquireLock(retries - 1);
             return false;
         }
         // 印に持ち主の札を入れる。古いとみなされて他の実行に取られた後で、元の実行が
@@ -66,6 +66,45 @@ class QueueStatus {
         this.lockToken = `${os.hostname()}:${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
         fs.writeFileSync(path.join(this.lockDir, 'owner'), this.lockToken);
         return true;
+    }
+
+    /** 印の持ち主の札（無ければ null） */
+    readLockOwner(dir) {
+        try {
+            return fs.readFileSync(path.join(dir, 'owner'), 'utf8');
+        } catch {
+            return null;
+        }
+    }
+
+    /**
+     * 古いと判断した印を片付ける。判断してから消すまでの間に、他の実行がその印を片付けて新しい印を
+     * 作っているかもしれないので、共有の名前のまま消さない。
+     * 1. 印を自分だけの名前に rename する（原子的。同じ印を2つの実行が同時に移すことはできない）
+     * 2. 移した印の札が、古いと判断したときに読んだ札と同じなら、それは古い印なので消す
+     * 3. 違えば他の実行が作った新しい印を移してしまったので、元の名前に戻して諦める
+     * @param {string|null} observed 古いと判断したときに読んだ札
+     * @returns {boolean} 取り直しに進んでよいか
+     */
+    reclaimStaleLock(observed) {
+        const quarantine = `${this.lockDir}.stale-${process.pid}-${crypto.randomBytes(4).toString('hex')}`;
+        try {
+            fs.renameSync(this.lockDir, quarantine);
+        } catch (e) {
+            // 他の実行が先に片付けた（ENOENT）。もう一度取りにいけばよい
+            return e.code === 'ENOENT';
+        }
+        if (this.readLockOwner(quarantine) === observed) {
+            fs.rmSync(quarantine, { recursive: true, force: true });
+            return true;
+        }
+        try {
+            fs.renameSync(quarantine, this.lockDir);
+        } catch {
+            // 戻す前にさらに別の実行が印を作った。移した印の持ち主は lockLost() で気づいて止まる
+            fs.rmSync(quarantine, { recursive: true, force: true });
+        }
+        return false;
     }
 
     /** 実行中の印がまだ自分のものか */
