@@ -45,7 +45,7 @@
     "w-ja-nn5": {
       "status": "active",
       "taskname": "種別C:[[:w:ja:プロジェクト:カテゴリ関連/キュー|PJ:カテゴリ関連/キュー]]の処理",
-      "description": "キューに提出されたカテゴリの再配属・複製・除去を実行し、結果をキューに返信する。[[:w:ja:Wikipedia‐ノート:Bot作業依頼#プロジェクト:カテゴリ関連/キューの再開について]]",
+      "description": "キューに提出されたカテゴリの再配属・除去を実行し、結果をキューに返信する。[[:w:ja:Wikipedia‐ノート:Bot作業依頼#プロジェクト:カテゴリ関連/キューの再開について]]",
       "file": "category-queue.js",
       "botstemplate": "1",
       "reqlink": ":w:ja:利用者:NanonaBot2/使用申請"

@@ -122,17 +122,29 @@ const fixtures = fs.existsSync(fixtureDir) ? fs.readdirSync(fixtureDir).filter(f
 
 test('実ページで旧版と同じ結果になる（追加した項目と名前空間の正規化を除く）', { skip: fixtures.length === 0 && 'test/fixtures/ に wikitext がありません' }, () => {
     const dir = fixtureDir;
+    // 新版で追加した項目は比べない
     const strip = ({ argsOrdered, namePosition, colon, sortKeyRaw, ...rest }) => rest;
+    // 名前空間の正規化（カテゴリ:x → Category:X など）で変わる項目は比べない
+    const categoryFields = c => ({ sortKey: c.sortKey, position: c.position, original: c.original });
     const isColonLink = x => /^\[\[\s*:/.test(x.original);
     for (const file of fixtures) {
         const text = fs.readFileSync(path.join(dir, file), 'utf8');
         const a = new LegacyParser().parse(text);
         const b = new WikitextParser().parse(text);
-        for (const key of ['templates', 'variables', 'extlinks', 'tables', 'headings', 'references', 'lists']) {
+        for (const key of ['variables', 'extlinks', 'tables', 'headings', 'references', 'lists']) {
             assert.deepEqual(b[key].map(strip), a[key], `${file}: ${key}`);
         }
+        // テンプレート: 名前以外はすべて比べる。名前は、旧版で名前空間の付かない普通のテンプレート（Template:名前）
+        // だったものだけ比べる（{{ファイル:x}} {{User:x}} などは新版で名前空間を正規化するため）
+        assert.equal(b.templates.length, a.templates.length, `${file}: templates`);
+        b.templates.forEach((t, i) => {
+            const { name: newName, ...newRest } = strip(t);
+            const { name: oldName, ...oldRest } = a.templates[i];
+            assert.deepEqual(newRest, oldRest, `${file}: templates[${i}]`);
+            if (oldName.split(':').length <= 2) assert.equal(newName, oldName, `${file}: templates[${i}].name`);
+        });
         // 旧版は [[:Category:X]] をカテゴリとして扱っていた
-        assert.deepEqual(b.categories.map(strip), a.categories.filter(x => !isColonLink(x)), `${file}: categories`);
+        assert.deepEqual(b.categories.map(categoryFields), a.categories.filter(x => !isColonLink(x)).map(categoryFields), `${file}: categories`);
         assert.deepEqual(b.wikilinks.length + b.files.length + b.categories.length,
             a.wikilinks.length + a.files.length + a.categories.length, `${file}: links`);
     }

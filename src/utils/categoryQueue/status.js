@@ -7,6 +7,7 @@
  *
  * 書き出しに失敗しても Bot の処理は止めない。
  */
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -51,7 +52,6 @@ class QueueStatus {
     acquireLock() {
         try {
             fs.mkdirSync(this.lockDir);
-            return true;
         } catch (e) {
             if (e.code !== 'EEXIST') throw e;
             const st = fs.statSync(this.lockDir, { throwIfNoEntry: false });
@@ -61,14 +61,37 @@ class QueueStatus {
             }
             return false;
         }
+        // 印に持ち主の札を入れる。古いとみなされて他の実行に取られた後で、元の実行が
+        // 新しい持ち主の印を更新・削除しないよう、札が自分のものか確かめてから触る
+        this.lockToken = `${os.hostname()}:${process.pid}:${crypto.randomBytes(6).toString('hex')}`;
+        fs.writeFileSync(path.join(this.lockDir, 'owner'), this.lockToken);
+        return true;
+    }
+
+    /** 実行中の印がまだ自分のものか */
+    ownsLock() {
+        if (!this.lockToken) return false;
+        try {
+            return fs.readFileSync(path.join(this.lockDir, 'owner'), 'utf8') === this.lockToken;
+        } catch {
+            return false;
+        }
+    }
+
+    /** 実行中の印を他の実行に取られたか（取られたら、それ以上編集しない） */
+    lockLost() {
+        return Boolean(this.lockToken) && !this.ownsLock();
     }
 
     releaseLock() {
-        fs.rmSync(this.lockDir, { recursive: true, force: true });
+        if (this.ownsLock()) fs.rmSync(this.lockDir, { recursive: true, force: true });
+        this.lockToken = null;
     }
 
     save() {
         this.data.updatedAt = new Date().toISOString();
+        // 印を取られていたら、新しい持ち主の実行状況を上書きしない
+        if (this.lockLost()) return;
         try {
             writeJsonAtomic(this.file, this.data);
             // 長い実行でも印が古いと判定されないよう、書くたびに更新する
@@ -153,7 +176,9 @@ class QueueStatus {
             s.id = outcome.id || null;
             s.message = outcome.message || null;
         }
-        if (record) {
+        // 履歴は1コマンド1行。呼び出し側は、コマンドが初めて終わったときだけ record を渡す
+        // （緊急停止は再開して終わったときに、返信の再送は書かない）。念のため終わっていない記録は書かない
+        if (record && record.state !== 'stopped' && record.state !== 'running') {
             try {
                 fs.appendFileSync(this.historyFile, JSON.stringify({ ...record, finishedAt: new Date().toISOString() }) + '\n');
             } catch (e) {

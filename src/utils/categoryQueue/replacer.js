@@ -194,15 +194,10 @@ function replaceInImageRequestTemplates(text, op, warnings) {
     if (!op.from.endsWith(IMAGE_REQUEST_SUFFIX)) return { text, changed: false };
     const strip = name => name.slice(0, -IMAGE_REQUEST_SUFFIX.length);
     const from = strip(op.from);
-    let to = op.to;
-    if (to.some(t => !t.endsWith(IMAGE_REQUEST_SUFFIX))) {
-        // 「…の画像提供依頼」以外への付け替えは引数では表せない
-        to = to.filter(t => t.endsWith(IMAGE_REQUEST_SUFFIX));
-        if (op.type !== 'remove') {
-            warnings.push(`画像提供依頼テンプレートの cat 引数では「…${IMAGE_REQUEST_SUFFIX}」以外のカテゴリを指定できないため、一部の移動先を反映していません`);
-        }
-    }
-    const subOp = { type: op.type, from: bareCategoryName(from), to: to.map(t => bareCategoryName(strip(t))) };
+    // 「…の画像提供依頼」以外への再配属は cat 引数では表せない。移動先を落として除去にしてしまわないよう、
+    // その場合はテンプレートを書き換えず、要確認として残す
+    const unrepresentable = op.type === 'reassign' && op.to.some(t => !t.endsWith(IMAGE_REQUEST_SUFFIX));
+    const subOp = { type: op.type, from: bareCategoryName(from), to: op.to.map(t => bareCategoryName(strip(t))) };
 
     const edits = [];
     for (const call of findTemplateCalls(text, IMAGE_REQUEST_TEMPLATES)) {
@@ -212,6 +207,10 @@ function replaceInImageRequestTemplates(text, op, warnings) {
             .sort((a, b) => a.order - b.order);
         const next = transformList(slots.map(s => s.value), subOp);
         if (!next) continue;
+        if (unrepresentable) {
+            warnings.push(`画像提供依頼テンプレートの cat 引数では「…${IMAGE_REQUEST_SUFFIX}」以外のカテゴリを指定できないため、テンプレートを書き換えませんでした`);
+            continue;
+        }
         edits.push(...rewriteSlots(text, slots, next, i => (i === 0 ? 'cat' : `cat${i + 1}`)));
     }
     if (edits.length === 0) return { text, changed: false };

@@ -1,0 +1,101 @@
+// PR #39 のレビューで直した点のテスト
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+const queue = require('../src/utils/categoryQueue/queue');
+const { formatStart } = require('../src/utils/categoryQueue/report');
+const { applyCategoryCommand } = require('../src/utils/categoryQueue/replacer');
+const { CommandRecord, readCommandRecord, reopenCommandRecord } = require('../src/utils/categoryQueue/record');
+const { QueueStatus } = require('../src/utils/categoryQueue/status');
+
+const ID = '20261014000000-abcdef';
+const SIG = '--[[利用者:A|A]] 2026年10月1日 (水) 00:00 (UTC)';
+const HEADING = '== Bot: [[:Category:Name1]]を除去 ==';
+const section = body => queue.parseQueueSections(`${HEADING}\n${body}\n`)[0];
+const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), 'cq-review-'));
+
+test('コメント・nowiki の中に写された着手の印は本物とみなさない', () => {
+    const mark = formatStart(ID);
+    for (const body of [`依頼 ${SIG}\n<!-- ${mark} -->`, `依頼 ${SIG}\n<nowiki>${mark}</nowiki>`]) {
+        const s = section(body);
+        assert.equal(queue.startedId(s), null, body);
+        assert.equal(queue.isHandled(s), false, body);
+        assert.equal(queue.findById(`${HEADING}\n${body}\n`, ID).error, 'missing', body);
+    }
+    // 本物の印は見つける。{{BOTREQ|着手}} の直後に ID が無いもの（人の作業者の着手）は印ではない
+    assert.equal(queue.startedId(section(`依頼 ${SIG}\n${mark}`)), ID);
+    const human = section(`依頼 ${SIG}\n:{{BOTREQ|着手}} 私がやります`);
+    assert.equal(queue.startedId(human), null);
+    assert.equal(queue.isHandled(human), true);
+});
+
+test('画像提供依頼: cat 引数で表せない移動先なら、除去にせず書き換えない（要確認）', () => {
+    const text = '{{画像提供依頼|写真|cat=東京都|date=2026年10月}}';
+    const r = applyCategoryCommand(text, { type: 'reassign', from: '東京都の画像提供依頼', to: ['日本の行政区画'] });
+    assert.equal(r.changed, false);
+    assert.equal(r.text, text);
+    assert.equal(r.warnings.length, 1);
+});
+
+test('記録を開き直すとき、件数はページの結果から数え直す', () => {
+    const dir = tmp();
+    try {
+        const rec = new CommandRecord(dir, ID, { heading: 'Bot: A' }, { dryRun: false });
+        rec.page({ title: 'p1', result: 'edited', warnings: ['w'] });
+        rec.page({ title: 'p2', result: 'error', message: 'x' });
+        // ページごとに概要も書き出している
+        assert.deepEqual(readCommandRecord(dir, ID).record.counts, { edited: 1, unchanged: 0, warnings: 1, errors: 1 });
+
+        // 概要を書く前に落ちた場合を模す（ページの結果だけ1件多い）
+        fs.appendFileSync(path.join(dir, 'commands', `${ID}.pages.jsonl`), JSON.stringify({ title: 'p3', result: 'unchanged' }) + '\n');
+        const reopened = reopenCommandRecord(dir, ID, { dryRun: false });
+        assert.deepEqual(reopened.data.counts, { edited: 1, unchanged: 1, warnings: 1, errors: 1 });
+        assert.equal(reopened.data.state, 'running');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('実行中の印を他の実行に取られたら、更新も削除もしない', () => {
+    const dir = tmp();
+    try {
+        const first = new QueueStatus(dir, 'normal');
+        assert.equal(first.acquireLock(), true);
+        assert.equal(first.ownsLock(), true);
+
+        // 印が古いとみなされて、別の実行が取り直した
+        fs.rmSync(path.join(dir, 'run.lock'), { recursive: true, force: true });
+        const second = new QueueStatus(dir, 'normal');
+        assert.equal(second.acquireLock(), true);
+
+        assert.equal(first.lockLost(), true);
+        first.save(); // 新しい持ち主の実行状況を上書きしない
+        assert.equal(fs.existsSync(path.join(dir, 'status.json')), false);
+        first.releaseLock(); // 新しい持ち主の印を消さない
+        assert.equal(second.ownsLock(), true);
+        assert.equal(new QueueStatus(dir, 'normal').acquireLock(), false);
+
+        second.releaseLock();
+        assert.equal(new QueueStatus(dir, 'normal').acquireLock(), true);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('履歴は終わったコマンドだけを書く（緊急停止で中断したものは書かない）', () => {
+    const dir = tmp();
+    try {
+        const st = new QueueStatus(dir, 'normal');
+        st.acquireLock();
+        st.setSections([{ heading: 'A' }, { heading: 'B' }]);
+        st.sectionEnd(0, { stopped: true, id: 'X' }, { id: 'X', state: 'stopped' });
+        st.sectionEnd(1, { status: '完了', id: 'Y' }, { id: 'Y', state: 'done', status: '完了' });
+        const lines = fs.readFileSync(path.join(dir, 'history.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+        assert.deepEqual(lines.map(l => l.id), ['Y']);
+        st.releaseLock();
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});

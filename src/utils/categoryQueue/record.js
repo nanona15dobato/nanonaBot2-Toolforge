@@ -107,6 +107,8 @@ class CommandRecord {
         } catch (e) {
             console.warn(`ページの結果を書き出せませんでした: ${e.message}`);
         }
+        // 異常終了しても件数が失われないよう、ページごとに概要も書き出す（再開時はページの結果から数え直す）
+        this.save();
     }
 
     /**
@@ -146,7 +148,19 @@ class CommandRecord {
 function reopenCommandRecord(dir, id, opts) {
     const found = readCommandRecord(dir, id);
     if (!found) return null;
-    return new CommandRecord(dir, id, { heading: found.record.heading }, opts, found.record);
+    // 件数はページの結果（追記だけのファイル）から数え直す。概要を書く前に落ちていても、処理済みの分を失わない
+    return new CommandRecord(dir, id, { heading: found.record.heading }, opts, { ...found.record, counts: countPages(found.pages) });
+}
+
+/** ページの結果から件数を数える */
+function countPages(pages) {
+    const counts = { edited: 0, unchanged: 0, warnings: 0, errors: 0 };
+    for (const p of pages) {
+        const key = { edited: 'edited', unchanged: 'unchanged', error: 'errors' }[p.result];
+        if (key) counts[key] += 1;
+        if (p.warnings && p.warnings.length > 0) counts.warnings += 1;
+    }
+    return counts;
 }
 
 /**

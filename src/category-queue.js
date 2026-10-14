@@ -224,16 +224,23 @@ async function processPage(title, command, ctx) {
         return { text: replaced.text, summary: ctx.summary, minor: true, watchlist: 'nochange' };
     }, { ...EDIT_CONFIG });
 
-    if (!res || res.result === 'aborted' || res.nochange) return { changed: false, warnings: [] };
+    // 書き換えなかったページでも、警告（{{リダイレクトの所属カテゴリ}}の件数超過など）は要確認として残す
+    if (!res || res.result === 'aborted' || res.nochange) return { changed: false, warnings: replaced ? replaced.warnings : [] };
     if (res.result !== 'Success') throw new Error(`保存に失敗しました (${res.result})`);
-    appendJsonl(operationsFile(ctx.id), {
-        title: res.title || title,
-        pageid: res.pageid,
-        oldrevid: res.oldrevid,
-        newrevid: res.newrevid,
-        timestamp: res.newtimestamp,
-    });
-    return { changed: true, warnings: replaced.warnings, revid: res.newrevid, oldrevid: res.oldrevid };
+    const result = { changed: true, warnings: replaced.warnings, revid: res.newrevid, oldrevid: res.oldrevid };
+    try {
+        appendJsonl(operationsFile(ctx.id), {
+            title: res.title || title,
+            pageid: res.pageid,
+            oldrevid: res.oldrevid,
+            newrevid: res.newrevid,
+            timestamp: res.newtimestamp,
+        });
+    } catch (e) {
+        // 編集は済んでいるのに取り消し用の記録が残らない。普通のエラーとは分け、呼び出し側でコマンドを止める
+        result.recordError = `取り消し用の記録を書き出せませんでした（${e.message}）。版 ${res.newrevid}`;
+    }
+    return result;
 }
 
 /**
@@ -256,6 +263,11 @@ async function executeSection(section, opts, record, resumed) {
         record.log(level, message);
         logger[level === 'warning' ? 'warning' : 'info'](taskId, `[${id}] ${message}`, isPublic && !opts.dryRun);
     };
+
+    // 再開: 中断している間に見出しが変わっていたら、別の操作を同じ ID で実行しないよう、何よりも先に中止する
+    if (resumed && record.data.heading !== section.heading) {
+        return { status: '中止', message: `中断している間に見出しが変更されたため中止しました（着手時: ${record.data.heading}）` };
+    }
 
     const parsed = queue.parseCommandHeading(section.heading);
     if (!parsed.ok) return { status: '不受理', message: parsed.error };
@@ -309,10 +321,17 @@ async function executeSection(section, opts, record, resumed) {
 
     let stopped = false;
     let aborted = null;
+    let recordFailed = false;
     let lastCheck = Date.now();
     let missingLogged = false;
     for (const title of targets) {
         if (!opts.dryRun && await isEmergencyStopped()) {
+            stopped = true;
+            break;
+        }
+        // 長く止まっていた間に実行中の印が古いとみなされ、他の実行に取られていたら、二重に編集しないよう止める
+        if (status.lockLost()) {
+            log('warning', '実行中の印を他の実行に取られたため止めます');
             stopped = true;
             break;
         }
@@ -325,26 +344,37 @@ async function executeSection(section, opts, record, resumed) {
                 if (!missingLogged) log('warning', `${check.reason}。処理は続けます`);
                 missingLogged = true;
             } else if (!check.ok) {
-                aborted = check.reason;
+                aborted = `実行中に節が変わったため中止しました（${check.reason}）`;
                 break;
             }
         }
         status.pageStart(title);
         let ev;
+        let recordError = null;
         try {
             const r = await processPage(title, command, ctx);
             ev = { title, result: r.changed ? 'edited' : 'unchanged', warnings: r.warnings, revid: r.revid, oldrevid: r.oldrevid };
+            recordError = r.recordError || null;
         } catch (e) {
             ev = { title, result: 'error', message: e.message || String(e) };
             log('warning', `${title}: ${ev.message}`);
         }
+        if (recordError) ev.message = recordError;
         record.page(ev);
         status.pageDone(ev);
+        if (recordError) {
+            // 編集は成功したが取り消しの記録が残らなかった。これ以上編集すると取り消せない編集が増えるので止める
+            record.log('error', `${title}: ${recordError}`);
+            logger.error(taskId, `[${id}] ${title}: ${recordError}`, false);
+            aborted = '取り消し用の記録を書き出せなかったため中止しました。運用者が確認します';
+            recordFailed = true;
+            break;
+        }
     }
 
     log(aborted ? 'warning' : 'info', `${stopped ? '緊急停止' : aborted ? `中止（${aborted}）` : '終了'}: 編集${c.edited}件 / 変更なし${c.unchanged}件 / 要確認${c.warnings}件 / エラー${c.errors}件`, true);
     if (stopped) return { stopped: true };
-    if (aborted) return { status: '中止', message: `実行中に節が変わったため中止しました（${aborted}）`, counts: { ...c } };
+    if (aborted) return { status: '中止', message: aborted, counts: { ...c }, fatal: recordFailed };
 
     const notes = [];
     if (command.type === 'reassign' && !opts.dryRun) {
@@ -409,6 +439,8 @@ async function postReply(section, id, started, reply) {
     const res = await bot.edit(QUEUE_PAGE, rev => {
         const found = started ? queue.findById(rev.content, id) : queue.findByRequest(rev.content, section);
         if (found.error) throw new Error('返信先の節が見つかりません（過去ログ化・除去された、または特定できない）');
+        // 着手していない節（不受理・不可能）は、選んでから返信するまでに他の作業者が対応したかもしれない
+        if (!started && queue.isHandled(found.section)) throw new Error('他の作業者が{{BOTREQ}}を付けたため返信しませんでした');
         return { text: queue.insertReply(rev.content, found.section, reply), summary: `Bot: /* ${headingSummary(section.heading)} */ キューの処理結果`, nocreate: true };
     }, { ...EDIT_CONFIG });
     if (res?.result !== 'Success') throw new Error(`返信を保存できませんでした (${res?.result})`);
@@ -483,7 +515,7 @@ async function runQueue(opts) {
                 record.setReply(done.reply.text, false, e.message);
             }
             record.finish({ status: done.status, message: done.message, notes: done.notes });
-            status.sectionEnd(index, { status: done.status, id, message: '返信の再送' }, record.summary());
+            status.sectionEnd(index, { status: done.status, id, message: '返信の再送' }, null); // 履歴には終わったときに書いてある
             continue;
         }
 
@@ -502,7 +534,7 @@ async function runQueue(opts) {
 
         if (outcome.stopped) {
             record.finish(outcome);
-            status.sectionEnd(index, outcome, record.summary());
+            status.sectionEnd(index, outcome, null); // 再開して終わったときに履歴へ書く
             logger.warning(taskId, '緊急停止しました。着手済みの節は次回同じ ID で再開します。', true);
             return '緊急停止';
         }
@@ -515,6 +547,10 @@ async function runQueue(opts) {
         }
         record.finish(outcome);
         status.sectionEnd(index, outcome, record.summary());
+        if (outcome.fatal) {
+            logger.error(taskId, '取り消し用の記録を書き出せないため、残りのキューを処理せずに終了します', false);
+            return '記録の失敗';
+        }
     }
     return '完了';
 }

@@ -59,7 +59,7 @@ function formatReply({ status, message, id, counts, notes = [] }) {
 
 /**
  * 着手の返信。印「{{BOTREQ|着手}} (ID: …)」を付け、以後はこの ID で節を探す
- * （queue.startMark と同じ形。変えるときは queue.js の START_MARK も直す）
+ * （queue.startMark と同じ形。変えるときは queue.js の MARK_ID_AFTER も直す）
  */
 function formatStart(id) {
     return `:{{BOTREQ|着手}} (ID: ${id}) 処理を始めました。進み具合は[${detailUrl(id)} 処理状況]で確認できます。 --~~~~`;

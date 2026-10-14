@@ -19,7 +19,8 @@ const NON_DISCUSSION_PREFIX = /^\s*:?\s*(?:category|カテゴリ|file|ファイ�
 const parser = new WikitextParser();
 
 // Bot が着手時に付ける印「{{BOTREQ|着手}} (ID: …)」。以後はこの ID で節を探す
-const START_MARK = /\{\{BOTREQ\|着手\}\} \(ID: (\d{14}-[0-9a-f]{6})\)/g;
+// （形は report.formatStart と同じ。{{BOTREQ|着手}} の直後に続く「 (ID: …)」を MARK_ID_AFTER で読む）
+const MARK_ID_AFTER = /^ \(ID: (\d{14}-[0-9a-f]{6})\)/;
 const startMark = id => `{{BOTREQ|着手}} (ID: ${id})`;
 
 /** 本文の最初の行（依頼文と署名）。返信が後ろに付いても変わらない */
@@ -64,8 +65,7 @@ function parseQueueSections(wikitext) {
  * @returns {{section: object} | {error: 'missing'|'ambiguous'}}
  */
 function findById(wikitext, id) {
-    const mark = startMark(id);
-    return single(parseQueueSections(wikitext).filter(s => s.body.includes(mark)));
+    return single(parseQueueSections(wikitext).filter(s => scanBotreq(s.body).marks.includes(id)));
 }
 
 /**
@@ -93,8 +93,7 @@ function isBotHeading(heading) {
 
 /** 節に付いている着手の印の ID（無ければ null） */
 function startedId(section) {
-    const m = new RegExp(START_MARK.source).exec(section.body);
-    return m ? m[1] : null;
+    return scanBotreq(section.body).marks[0] || null;
 }
 
 /**
@@ -103,10 +102,26 @@ function startedId(section) {
  * 印の ID が本当にこの Bot のものか（再開してよいか）は、呼び出し側が手元の記録で確かめる
  */
 function isHandled(section) {
-    const botreqs = parser.parse(section.body, { templates: true }).templates
-        .filter(t => t.type === 'template' && t.name.toLowerCase() === 'template:botreq').length;
-    const marks = (section.body.match(START_MARK) || []).length;
-    return botreqs > marks;
+    const { botreqs, marks } = scanBotreq(section.body);
+    return botreqs > marks.length;
+}
+
+/**
+ * 本文の {{BOTREQ}} を数え、着手の印（{{BOTREQ|着手}} の直後に「 (ID: …)」が続くもの）の ID を集める。
+ * parse2 で解析するので、コメントや <nowiki> の中に写された印は数えない
+ * @param {string} body
+ * @returns {{botreqs: number, marks: string[]}}
+ */
+function scanBotreq(body) {
+    const templates = parser.parse(body, { templates: true }).templates
+        .filter(t => t.type === 'template' && t.name.toLowerCase() === 'template:botreq');
+    const marks = [];
+    for (const t of templates) {
+        if ((t.args['1'] || '').trim() !== '着手') continue;
+        const m = MARK_ID_AFTER.exec(body.slice(t.position.end));
+        if (m) marks.push(m[1]);
+    }
+    return { botreqs: templates.length, marks };
 }
 
 function normalizeSpaces(s) {
