@@ -7,7 +7,7 @@ const path = require('path');
 const queue = require('../src/utils/categoryQueue/queue');
 const { formatStart } = require('../src/utils/categoryQueue/report');
 const { applyCategoryCommand } = require('../src/utils/categoryQueue/replacer');
-const { CommandRecord, readCommandRecord, reopenCommandRecord } = require('../src/utils/categoryQueue/record');
+const { CommandRecord, readCommandRecord, reopenCommandRecord, listCommandRecords, updateCommandRecord, SkipIndex } = require('../src/utils/categoryQueue/record');
 const { QueueStatus } = require('../src/utils/categoryQueue/status');
 
 const ID = '20261014000000-abcdef';
@@ -156,4 +156,41 @@ test('結果の返信（ID 付き）を見分ける。人の返信やコメン�
     assert.deepEqual(queue.idReplies(s), [{ status: '完了', id: ID }]);
     assert.equal(queue.startedId(s), ID);
     assert.equal(queue.isHandled(s), true);
+});
+
+test('見送りの記録: 見出し行と依頼文が同じ節を同じものとみなし、無くなった節の分は消す', () => {
+    const dir = tmp();
+    try {
+        const a = section(`依頼A ${SIG}`);
+        const b = section(`依頼B ${SIG}`);
+        const skips = new SkipIndex(dir);
+        skips.set(a, ID);
+        // 返信が付いても依頼文（本文の最初の行）は変わらない
+        assert.equal(new SkipIndex(dir).get(section(`依頼A ${SIG}
+:返信`)), ID);
+        assert.equal(new SkipIndex(dir).get(b), null);
+        const reread = new SkipIndex(dir);
+        reread.prune([b]);
+        assert.equal(new SkipIndex(dir).get(a), null);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('記録の一覧は概要だけを読み、壊れたファイルを飛ばす。概要に注意書きを足せる', () => {
+    const dir = tmp();
+    try {
+        const rec = new CommandRecord(dir, ID, { heading: 'Bot: A' }, { dryRun: false, queuePage: 'Q' });
+        rec.page({ title: 'p1', result: 'edited' });
+        fs.writeFileSync(path.join(dir, 'commands', '20261014000000-000000.json'), '{壊れた');
+        const list = listCommandRecords(dir);
+        assert.deepEqual(list.map(r => [r.id, r.queuePage]), [[ID, 'Q']]);
+        updateCommandRecord(dir, ID, r => { r.orphanNotifiedAt = 'x'; });
+        assert.equal(readCommandRecord(dir, ID).record.orphanNotifiedAt, 'x');
+        // 再開したら（節が戻された）、また知らせられるよう印を消す
+        assert.equal(reopenCommandRecord(dir, ID, { dryRun: false }).data.orphanNotifiedAt, null);
+        assert.deepEqual(listCommandRecords(path.join(dir, 'none')), []);
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
 });

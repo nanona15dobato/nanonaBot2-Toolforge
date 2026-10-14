@@ -7,6 +7,7 @@
  * キューページへの返信は件数だけにし、ページの一覧や理由はここに残す。
  * 書き出しに失敗しても Bot の処理は止めない。
  */
+const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
 
@@ -23,15 +24,15 @@ class CommandRecord {
      * @param {string} dir data/category-queue
      * @param {string} id
      * @param {{heading: string}} section
-     * @param {{dryRun: boolean}} opts
+     * @param {{dryRun: boolean, queuePage?: string}} opts
      */
-    constructor(dir, id, section, { dryRun }, existing = null) {
+    constructor(dir, id, section, { dryRun, queuePage = null }, existing = null) {
         this.dir = path.join(dir, 'commands');
         this.file = path.join(this.dir, `${id}.json`);
         this.pagesFile = path.join(this.dir, `${id}.pages.jsonl`);
         if (existing) {
             // 緊急停止・異常終了したコマンドの再開。件数とページの結果はそのまま積み増す
-            this.data = { ...existing, state: 'running', status: null, finishedAt: null, resumedAt: new Date().toISOString() };
+            this.data = { ...existing, state: 'running', status: null, finishedAt: null, resumedAt: new Date().toISOString(), orphanNotifiedAt: null };
             this.save();
             return;
         }
@@ -39,6 +40,7 @@ class CommandRecord {
             id,
             heading: section.heading,
             dryRun,
+            queuePage, // どのキューページの依頼か（--queue-page で別のページを使ったときに見分ける）
             state: 'running',
             status: null,
             message: null,
@@ -188,4 +190,95 @@ function readCommandRecord(dir, id) {
     return { record, pages };
 }
 
-module.exports = { CommandRecord, readCommandRecord, reopenCommandRecord, ID_PATTERN };
+/**
+ * 記録の概要（commands/<ID>.json）をすべて読む。ページの結果は読まない。壊れたファイルは飛ばす
+ * @returns {object[]}
+ */
+function listCommandRecords(dir) {
+    const commandsDir = path.join(dir, 'commands');
+    let names;
+    try {
+        names = fs.readdirSync(commandsDir);
+    } catch (e) {
+        if (e.code === 'ENOENT') return [];
+        throw e;
+    }
+    const records = [];
+    for (const name of names) {
+        const m = /^(.+).json$/.exec(name);
+        if (!m || !ID_PATTERN.test(m[1])) continue;
+        try {
+            records.push(JSON.parse(fs.readFileSync(path.join(commandsDir, name), 'utf8')));
+        } catch {
+            // 書き換えの途中などで読めないものは飛ばす
+        }
+    }
+    return records;
+}
+
+/**
+ * 記録の概要を書き換える（実行中でないコマンドに、注意書きなどを残すため）
+ * @param {(record: object) => void} mutate
+ */
+function updateCommandRecord(dir, id, mutate) {
+    if (!ID_PATTERN.test(String(id))) return;
+    const file = path.join(dir, 'commands', `${id}.json`);
+    const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    mutate(record);
+    writeJsonAtomic(file, record);
+}
+
+/**
+ * 見送った節の記録（data/category-queue/skipped.json。節の鍵 → ID）
+ * 同じ節を実行のたびに見送っても、記録と履歴を増やさず、同じ ID の記録を使い回すために使う
+ */
+class SkipIndex {
+    constructor(dir) {
+        this.file = path.join(dir, 'skipped.json');
+        try {
+            this.map = JSON.parse(fs.readFileSync(this.file, 'utf8'));
+        } catch {
+            this.map = {};
+        }
+    }
+
+    /** 節の鍵（見出し行と依頼文。queue.findByRequest で同じ節とみなすもの） */
+    static keyOf(section) {
+        return crypto.createHash('sha1').update(`${section.headingLine}
+${section.requestLine}`).digest('hex');
+    }
+
+    get(section) {
+        return this.map[SkipIndex.keyOf(section)] || null;
+    }
+
+    set(section, id) {
+        this.map[SkipIndex.keyOf(section)] = id;
+        this.save();
+    }
+
+    delete(section) {
+        const key = SkipIndex.keyOf(section);
+        if (!(key in this.map)) return;
+        delete this.map[key];
+        this.save();
+    }
+
+    /** キューページから無くなった節の分を消す */
+    prune(sections) {
+        const keys = new Set(sections.map(SkipIndex.keyOf));
+        const before = Object.keys(this.map).length;
+        for (const key of Object.keys(this.map)) if (!keys.has(key)) delete this.map[key];
+        if (Object.keys(this.map).length !== before) this.save();
+    }
+
+    save() {
+        try {
+            writeJsonAtomic(this.file, this.map);
+        } catch (e) {
+            console.warn(`見送りの記録を書き出せませんでした: ${e.message}`);
+        }
+    }
+}
+
+module.exports = { CommandRecord, readCommandRecord, reopenCommandRecord, listCommandRecords, updateCommandRecord, SkipIndex, ID_PATTERN };

@@ -25,7 +25,7 @@ const { logger } = require('./utils/logger');
 const queue = require('./utils/categoryQueue/queue');
 const { applyCategoryCommand, REDIRECT_CATEGORY_TEMPLATES, IMAGE_REQUEST_SUFFIX } = require('./utils/categoryQueue/replacer');
 const { editSummary, formatReply, formatStart, catLink } = require('./utils/categoryQueue/report');
-const { CommandRecord, readCommandRecord, reopenCommandRecord } = require('./utils/categoryQueue/record');
+const { CommandRecord, readCommandRecord, reopenCommandRecord, listCommandRecords, updateCommandRecord, SkipIndex } = require('./utils/categoryQueue/record');
 const { identifyRequester } = require('./utils/categoryQueue/requester');
 const { QueueStatus } = require('./utils/categoryQueue/status');
 const taskId = 'w-ja-nn5';
@@ -483,18 +483,22 @@ async function replyAndRecord(section, record, outcome, opts) {
  * - 着手の印があり、手元の記録と節の様子が食い違っている（結果を返信した直後に落ちた、中断中に他の作業者が
  *   対応した）→ 編集も返信もせず、記録だけを節に合わせる（reconcile）
  * - それ以外（他の作業者の {{BOTREQ}}、手元に記録の無い印）→ 何もしない
+ * 着手の印のある節は、中断している間に見出しから「Bot:」を外されても（異議）照らし合わせる。
+ * 再開すると見出しの変更に気づいて「中止」を返信する（executeSection）。
+ * 返信しない実行（dry-run など）は、着手済みのコマンドの記録に触らない（完了と記録して、
+ * 次の本番の実行が「完了」を再送してしまうため）
  */
-function selectWork(content, opts) {
+function selectWork(sections, opts) {
     const work = [];
-    for (const s of queue.parseQueueSections(content)) {
-        if (!queue.isBotHeading(s.heading)) continue;
+    for (const s of sections) {
         if (opts.only && !s.heading.includes(opts.only)) continue;
         // 対応済みの節も、この Bot の着手の印があれば手元の記録と照らし合わせてから判断する
         const id = queue.startedId(s);
         if (!id) {
-            if (!queue.isHandled(s)) work.push({ kind: 'new', section: s });
+            if (queue.isBotHeading(s.heading) && !queue.isHandled(s)) work.push({ kind: 'new', section: s });
             continue;
         }
+        if (!opts.report) continue;
         const found = readCommandRecord(DATA_DIR, id);
         if (!found) continue; // 手元に記録の無い印（手書きなど）
         const r = found.record;
@@ -507,7 +511,7 @@ function selectWork(content, opts) {
             if (r.state !== 'done') work.push({ kind: 'reconcile', section: s, id, handledByOther: true });
         } else if (r.state !== 'done') {
             work.push({ kind: 'resume', section: s, id });
-        } else if (r.reply && !r.reply.posted && opts.report) {
+        } else if (r.reply && !r.reply.posted) {
             work.push({ kind: 'resend', section: s, id });
         }
     }
@@ -538,10 +542,41 @@ function reconcileRecord(work, opts) {
     return { outcome: { ...outcome, message: outcome.message || '記録の整理' }, history: before.state === 'done' ? null : record.summary() };
 }
 
+/**
+ * 中断しているコマンド（緊急停止・異常終了）のうち、着手の印のある節がキューページから無くなったもの
+ * （中断している間に過去ログ化・除去された）を運用者に知らせる。途中まで編集したまま再開されないため。
+ * 知らせるのは1コマンド1回。記録は終わらせない（節が戻されれば、次の実行で再開する）
+ * @param {object[]} sections キューページの節
+ */
+function notifyOrphanedCommands(sections) {
+    const present = new Set(sections.map(queue.startedId).filter(Boolean));
+    for (const r of listCommandRecords(DATA_DIR)) {
+        if (r.state === 'done' || !r.started || r.dryRun || r.orphanNotifiedAt || present.has(r.id)) continue;
+        if ((r.queuePage || SITES[SITE.name].queuePage) !== QUEUE_PAGE) continue;
+        const message = '中断している間に、着手の印のある節がキューページから無くなりました（過去ログ化・除去）。途中まで編集したまま再開できないので、運用者が確認します';
+        logger.error(taskId, `[${r.id}] ${message}: ${r.heading}`, false);
+        try {
+            updateCommandRecord(DATA_DIR, r.id, record => {
+                record.orphanNotifiedAt = new Date().toISOString();
+                record.log.push({ at: record.orphanNotifiedAt, level: 'error', message });
+            });
+        } catch (e) {
+            logger.warning(taskId, `[${r.id}] 記録に書き込めませんでした: ${e.message}`);
+        }
+    }
+}
+
 /** @returns {Promise<string>} 終わり方（実行状況に出す） */
 async function runQueue(opts) {
     const { status } = opts;
-    const work = selectWork(await readQueuePage(), opts);
+    const sections = queue.parseQueueSections(await readQueuePage());
+    // 返信しない実行（dry-run など）は、着手済みのコマンドの記録・見送りの記録に触らない
+    const skips = opts.report ? new SkipIndex(DATA_DIR) : null;
+    if (opts.report) {
+        notifyOrphanedCommands(sections);
+        skips.prune(sections);
+    }
+    const work = selectWork(sections, opts);
     logger.info(taskId, `処理するキュー: ${work.length}件（新規${work.filter(w => w.kind === 'new').length}・再開${work.filter(w => w.kind === 'resume').length}・返信の再送${work.filter(w => w.kind === 'resend').length}・記録の整理${work.filter(w => w.kind === 'reconcile').length}）`);
     status.setSections(work.map(w => w.section));
     if (work.length === 0) return '未処理のキューなし';
@@ -574,18 +609,31 @@ async function runQueue(opts) {
             continue;
         }
 
-        // 不受理・不可能も含め、処理した節には ID を振って記録する（再開なら同じ ID の記録を開く）
+        // 不受理・不可能も含め、処理した節には ID を振って記録する（再開なら同じ ID の記録を開く）。
+        // 前の実行で見送った節なら、そのときの記録を開き直して使い回す
         const resumed = kind === 'resume';
-        const record = resumed ? reopenCommandRecord(DATA_DIR, id, opts) : new CommandRecord(DATA_DIR, newCommandId(), section, opts);
+        const skippedId = !resumed && skips ? skips.get(section) : null;
+        const record = (resumed || skippedId ? reopenCommandRecord(DATA_DIR, resumed ? id : skippedId, opts) : null)
+            || new CommandRecord(DATA_DIR, newCommandId(), section, opts);
+        const previousSkip = skippedId === record.id ? record.data.message : null;
         let outcome;
+        let error = null;
         try {
             outcome = await executeSection(section, opts, record, resumed);
         } catch (e) {
-            logger.error(taskId, `節「${section.heading}」の処理中にエラー: ${e.message}`, false, { stack: e.stack });
-            record.log('error', `内部エラー: ${e.message}`);
-            outcome = { status: '中止', message: 'Botの内部エラーにより処理を中止しました。運用者が確認します' };
+            error = e;
+            outcome = resumed || record.data.started
+                ? { status: '中止', message: 'Botの内部エラーにより処理を中止しました。運用者が確認します' }
+                // 着手する前（節に何も書いていない）なら、一時的なエラーかもしれないので返信せず、次の実行でやり直す
+                : { status: '見送り', message: `着手する前にエラーが起きたため見送りました（${e.message}）。次の実行でやり直します`, skipped: true };
         }
         outcome.id = record.id;
+        // 前の実行と同じ理由で見送るだけなら、ログ・メールを繰り返さない
+        const repeatedSkip = outcome.skipped && previousSkip === outcome.message;
+        if (error && !repeatedSkip) {
+            logger.error(taskId, `節「${section.heading}」の処理中にエラー: ${error.message}`, false, { stack: error.stack });
+            record.log('error', `内部エラー: ${error.message}`);
+        }
 
         if (outcome.stopped) {
             record.finish(outcome);
@@ -594,14 +642,19 @@ async function runQueue(opts) {
             return '緊急停止';
         }
         if (outcome.skipped) {
-            // 着手する直前に節が変わっていた（過去ログ化・見出しの変更・他の作業者の対応）。返信しない
-            logger.warning(taskId, `[${record.id}] 見送り: ${section.heading}: ${outcome.message}`);
-            record.log('warning', `実行を見送りました: ${outcome.message}`);
+            // 着手する直前に節が変わっていた（過去ログ化・見出しの変更・他の作業者の対応）か、着手の前にエラーが起きた。返信しない
+            if (!repeatedSkip) {
+                logger.warning(taskId, `[${record.id}] 見送り: ${section.heading}: ${outcome.message}`);
+                record.log('warning', `実行を見送りました: ${outcome.message}`);
+            }
+            if (skips) skips.set(section, record.id);
         } else {
+            if (skips) skips.delete(section);
             await replyAndRecord(section, record, outcome, opts);
         }
         record.finish(outcome);
-        status.sectionEnd(index, outcome, record.summary());
+        // 同じ理由で見送り続けているだけなら、履歴にもう一度は書かない
+        status.sectionEnd(index, outcome, repeatedSkip ? null : record.summary());
         if (outcome.fatal) {
             logger.error(taskId, '取り消し用の記録を書き出せないため、残りのキューを処理せずに終了します', false);
             return '記録の失敗';
@@ -682,6 +735,7 @@ async function rollback(id, opts) {
         return;
     }
     opts.status = status;
+    opts.queuePage = QUEUE_PAGE;
     let reason = 'エラー';
     try {
         status.save();
