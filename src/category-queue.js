@@ -132,7 +132,9 @@ function readOperations(id) {
 function saveDryRun(id, title, before, after) {
     const dir = path.join(DATA_DIR, 'dry-run', id);
     fs.mkdirSync(dir, { recursive: true });
-    const base = title.replace(/[\\/:*?"<>|]/g, '_');
+    // 使えない文字を _ にするだけだと「A/B」と「A:B」が同じ名前になるので、元のページ名のハッシュを付ける
+    const hash = crypto.createHash('sha1').update(title).digest('hex').slice(0, 8);
+    const base = `${title.replace(/[\\/:*?"<>|]/g, '_')}.${hash}`;
     fs.writeFileSync(path.join(dir, `${base}.before.wiki`), before);
     fs.writeFileSync(path.join(dir, `${base}.after.wiki`), after);
 }
@@ -307,9 +309,15 @@ async function executeSection(section, opts, record, resumed) {
         }
     }
 
-    const targets = (await listTargets(command)).slice(0, opts.maxPages);
+    let targets = await listTargets(command);
+    if (resumed) {
+        // 前回までに処理したページ（変更なし・エラーで移動元に残っているものを含む）は、もう一度処理・計上しない
+        const done = new Set((readCommandRecord(DATA_DIR, id)?.pages || []).map(p => p.title));
+        targets = targets.filter(t => !done.has(t));
+    }
+    targets = targets.slice(0, opts.maxPages);
     const c = record.data.counts;
-    // 再開のときは、前回までに処理したページの数も対象に含める（処理済みのページは移動元から外れている）
+    // 再開のときは、前回までに処理したページの数も対象に含める
     record.setCommand(command, discussionLink, c.edited + c.unchanged + c.errors + targets.length);
     if (targets.length === 0 && !resumed) {
         return { status: '不可能', message: 'カテゴリに操作対象となる所属記事または所属カテゴリがありませんでした' };
@@ -567,11 +575,16 @@ async function rollback(id, opts) {
     status.sectionStart(0);
     status.commandStart({ id, command: { type: 'rollback', from: null, to: [], namespaces: [] }, discussionLink: null, total: operations.length });
     let done = 0;
+    let stopReason = null;
     for (const op of [...operations].reverse()) {
         if (opts.dryRun) {
             console.log(`取り消し予定: ${op.title} (rev ${op.newrevid})`);
             continue;
         }
+        // 取り消しも編集なので、通常の編集と同じく1件ごとに緊急停止と実行中の印を確かめる
+        if (await isEmergencyStopped()) stopReason = '緊急停止';
+        else if (status.lockLost()) stopReason = '実行中の印を他の実行に取られたため';
+        if (stopReason) break;
         status.pageStart(op.title);
         try {
             const res = await bot.request({
@@ -595,6 +608,12 @@ async function rollback(id, opts) {
             logger.warning(taskId, `[${id}] 取り消し失敗: ${op.title}: ${e.message}`);
             status.pageDone({ title: op.title, result: 'error', message: e.message });
         }
+    }
+    if (stopReason) {
+        // 途中で止めた。もう一度 --rollback すれば残りを取り消せる（取り消し済みの版は取り消しに失敗するだけで、二重には戻らない）
+        status.sectionEnd(0, { status: '緊急停止', stopped: true, id, message: `${done}/${operations.length}件を取り消したところで止めました（${stopReason}）` });
+        logger.warning(taskId, `[${id}] 取り消しを途中で止めました（${stopReason}）: ${done}/${operations.length}件`, !opts.dryRun);
+        return stopReason;
     }
     status.sectionEnd(0, { status: '完了', id, message: `${done}/${operations.length}件を取り消しました` });
     logger.info(taskId, `[${id}] 取り消し終了: ${done}/${operations.length}件`, !opts.dryRun);

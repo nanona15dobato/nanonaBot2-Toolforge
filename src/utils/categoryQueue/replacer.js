@@ -18,7 +18,23 @@ const IMAGE_REQUEST_SUFFIX = 'の画像提供依頼';
 const MAX_REDIRECT_CATEGORIES = 20;
 
 const parser = new WikitextParser();
-const applyEdits = WikitextParser.applyEdits;
+/**
+ * 編集をまとめて適用する。行ごと消す範囲（expandToLine）は前後の改行を含むので、連続する行を消すと
+ * 範囲が重なることがある（最終行は直前の改行を含めるため）。重なった削除どうしは1つにまとめる
+ */
+function applyEdits(text, edits) {
+    const sorted = [...edits].sort((a, b) => a.start - b.start || a.end - b.end);
+    const merged = [];
+    for (const e of sorted) {
+        const last = merged[merged.length - 1];
+        if (last && e.start < last.end && last.replacement === '' && e.replacement === '') {
+            last.end = Math.max(last.end, e.end);
+            continue;
+        }
+        merged.push({ start: e.start, end: e.end, replacement: e.replacement });
+    }
+    return WikitextParser.applyEdits(text, merged);
+}
 
 /** [start, end) がその行の唯一の内容なら、改行ごと消す範囲に広げる */
 function expandToLine(text, start, end) {

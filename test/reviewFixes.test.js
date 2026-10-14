@@ -133,3 +133,13 @@ test('古い印の取り直し: 他の実行が先に取り直した新しい印
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+
+test('連続する行のカテゴリタグ・テンプレートを消しても、範囲の重なりで失敗しない', () => {
+    const remove = text => applyCategoryCommand(text, { type: 'remove', from: 'A', to: [] }).text;
+    assert.equal(remove('[[Category:A]]\n[[Category:A]]'), '');
+    assert.equal(remove('x\n[[Category:A]]\n[[Category:A|k]]'), 'x\n');
+    assert.equal(remove('[[Category:A]]\n[[Category:Z]]\n[[Category:A]]'), '[[Category:Z]]');
+    assert.equal(remove('{{リダイレクトの所属カテゴリ|1-1=A}}\n{{リダイレクトの所属カテゴリ|1-1=A}}'), '');
+    // 再配属（最初のタグは置き換え、残りは消す）も同じ
+    assert.equal(applyCategoryCommand('[[Category:A]]\n[[Category:A]]', { type: 'reassign', from: 'A', to: ['B'] }).text, '[[Category:B]]');
+});
