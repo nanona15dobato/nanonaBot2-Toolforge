@@ -116,12 +116,23 @@ function scanBotreq(body) {
     const templates = parser.parse(body, { templates: true }).templates
         .filter(t => t.type === 'template' && t.name.toLowerCase() === 'template:botreq');
     const marks = [];
+    const replies = [];
     for (const t of templates) {
-        if ((t.args['1'] || '').trim() !== '着手') continue;
         const m = MARK_ID_AFTER.exec(body.slice(t.position.end));
-        if (m) marks.push(m[1]);
+        if (!m) continue;
+        const status = (t.args['1'] || '').trim();
+        if (status === '着手') marks.push(m[1]);
+        else replies.push({ status, id: m[1] });
     }
-    return { botreqs: templates.length, marks };
+    return { botreqs: templates.length, marks, replies };
+}
+
+/**
+ * Bot が節に付けた結果の返信（「{{BOTREQ|完了}} (ID: …)」など、着手以外で ID の付いたもの）
+ * @returns {{status: string, id: string}[]}
+ */
+function idReplies(section) {
+    return scanBotreq(section.body).replies;
 }
 
 function normalizeSpaces(s) {
@@ -225,6 +236,7 @@ module.exports = {
     findById,
     findByRequest,
     startedId,
+    idReplies,
     startMark,
     insertReply,
 };

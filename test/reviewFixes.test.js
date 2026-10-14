@@ -143,3 +143,17 @@ test('連続する行のカテゴリタグ・テンプレートを消しても�
     // 再配属（最初のタグは置き換え、残りは消す）も同じ
     assert.equal(applyCategoryCommand('[[Category:A]]\n[[Category:A]]', { type: 'reassign', from: 'A', to: ['B'] }).text, '[[Category:B]]');
 });
+
+test('結果の返信（ID 付き）を見分ける。人の返信やコメント内のものは数えない', () => {
+    const body = [
+        `依頼 ${SIG}`,
+        formatStart(ID),
+        `:{{BOTREQ|完了}} (ID: ${ID}) 3件を編集しました。 --[[利用者:NanonaBot2|NanonaBot2]]`,
+        ':{{BOTREQ|完了}} 手作業で対応 --[[利用者:Other|Other]]',
+        `<!-- :{{BOTREQ|中止}} (ID: 20261014999999-000000) -->`,
+    ].join('\n');
+    const s = section(body);
+    assert.deepEqual(queue.idReplies(s), [{ status: '完了', id: ID }]);
+    assert.equal(queue.startedId(s), ID);
+    assert.equal(queue.isHandled(s), true);
+});

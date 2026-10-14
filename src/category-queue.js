@@ -290,6 +290,8 @@ async function executeSection(section, opts, record, resumed) {
     }
 
     if (resumed) {
+        // 着手の返信の直後に落ちて「着手した」と記録できていなくても、節には印がある
+        if (!record.data.started) record.markStarted();
         log('info', '着手済みのコマンドを再開します', true);
     } else if (opts.report) {
         const start = await postStart(section, id);
@@ -478,37 +480,82 @@ async function replyAndRecord(section, record, outcome, opts) {
  * - {{BOTREQ}} が無い節 → 新しく実行する
  * - この Bot の着手の印だけがあり、手元の記録が終わっていない（緊急停止・異常終了）→ 同じ ID で再開する
  * - 着手の印があり、記録は終わっているが返信を投稿できていない → 返信だけ再送する
+ * - 着手の印があり、手元の記録と節の様子が食い違っている（結果を返信した直後に落ちた、中断中に他の作業者が
+ *   対応した）→ 編集も返信もせず、記録だけを節に合わせる（reconcile）
  * - それ以外（他の作業者の {{BOTREQ}}、手元に記録の無い印）→ 何もしない
  */
 function selectWork(content, opts) {
     const work = [];
     for (const s of queue.parseQueueSections(content)) {
-        if (!queue.isBotHeading(s.heading) || queue.isHandled(s)) continue;
+        if (!queue.isBotHeading(s.heading)) continue;
         if (opts.only && !s.heading.includes(opts.only)) continue;
+        // 対応済みの節も、この Bot の着手の印があれば手元の記録と照らし合わせてから判断する
         const id = queue.startedId(s);
         if (!id) {
-            work.push({ kind: 'new', section: s });
+            if (!queue.isHandled(s)) work.push({ kind: 'new', section: s });
             continue;
         }
         const found = readCommandRecord(DATA_DIR, id);
-        if (!found) continue;
+        if (!found) continue; // 手元に記録の無い印（手書きなど）
         const r = found.record;
-        if (r.state !== 'done') work.push({ kind: 'resume', section: s, id });
-        else if (r.reply && !r.reply.posted && opts.report) work.push({ kind: 'resend', section: s, id });
+        const posted = queue.idReplies(s).find(x => x.id === id);
+        if (posted) {
+            // 結果の返信は節にある。記録が終わっていない・返信を記録していないなら、記録だけ整える（再送しない）
+            if (r.state !== 'done' || !(r.reply && r.reply.posted)) work.push({ kind: 'reconcile', section: s, id, postedStatus: posted.status });
+        } else if (queue.isHandled(s)) {
+            // 中断している間に他の作業者が {{BOTREQ}} を付けた。再開せず、記録を終わらせる
+            if (r.state !== 'done') work.push({ kind: 'reconcile', section: s, id, handledByOther: true });
+        } else if (r.state !== 'done') {
+            work.push({ kind: 'resume', section: s, id });
+        } else if (r.reply && !r.reply.posted && opts.report) {
+            work.push({ kind: 'resend', section: s, id });
+        }
     }
     return work;
+}
+
+/**
+ * 記録を節の様子に合わせる（編集も返信もしない）
+ * @returns {object} sectionEnd に渡す結果
+ */
+function reconcileRecord(work, opts) {
+    const before = readCommandRecord(DATA_DIR, work.id).record;
+    const record = reopenCommandRecord(DATA_DIR, work.id, opts);
+    let outcome;
+    if (work.handledByOther) {
+        record.log('warning', '中断している間に他の作業者が{{BOTREQ}}を付けたため、再開せずに終えました');
+        outcome = { status: '中止', message: '中断している間に他の作業者が対応したため、再開しませんでした', notes: before.notes };
+    } else {
+        // 返信は投稿済み。前回の実行は返信の後、記録を書き終える前に止まっていた
+        const text = before.reply ? before.reply.text : `（{{BOTREQ|${work.postedStatus}}} を返信済み。返信文は記録されていない）`;
+        record.setReply(text, true);
+        record.log('info', '結果は返信済みでした（前回の実行が返信の後で止まっていた）。記録を整えました');
+        outcome = { status: before.status || work.postedStatus, message: before.message, notes: before.notes };
+    }
+    outcome.id = work.id;
+    record.finish(outcome);
+    // 履歴は1コマンド1行。前回までに終わっていたなら、もう書いてある
+    return { outcome: { ...outcome, message: outcome.message || '記録の整理' }, history: before.state === 'done' ? null : record.summary() };
 }
 
 /** @returns {Promise<string>} 終わり方（実行状況に出す） */
 async function runQueue(opts) {
     const { status } = opts;
     const work = selectWork(await readQueuePage(), opts);
-    logger.info(taskId, `処理するキュー: ${work.length}件（新規${work.filter(w => w.kind === 'new').length}・再開${work.filter(w => w.kind === 'resume').length}・返信の再送${work.filter(w => w.kind === 'resend').length}）`);
+    logger.info(taskId, `処理するキュー: ${work.length}件（新規${work.filter(w => w.kind === 'new').length}・再開${work.filter(w => w.kind === 'resume').length}・返信の再送${work.filter(w => w.kind === 'resend').length}・記録の整理${work.filter(w => w.kind === 'reconcile').length}）`);
     status.setSections(work.map(w => w.section));
     if (work.length === 0) return '未処理のキューなし';
 
-    for (const [index, { kind, section, id }] of work.entries()) {
+    for (const [index, item] of work.entries()) {
+        const { kind, section, id } = item;
         status.sectionStart(index);
+
+        if (kind === 'reconcile') {
+            const { outcome, history } = reconcileRecord(item, opts);
+            logger.info(taskId, `[${id}] 記録を節に合わせました: ${outcome.status}`);
+            status.sectionEnd(index, outcome, history);
+            continue;
+        }
 
         if (kind === 'resend') {
             // 開き直すと状態が「実行中」になるので、終わったときの状態を先に読んでおく
