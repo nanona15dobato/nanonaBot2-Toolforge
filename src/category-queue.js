@@ -149,37 +149,136 @@ async function listMembers(name) {
     return titles;
 }
 
-// 残りのページをパージ（forcelinkupdate）する件数。リンクの更新には利用者ごとの回数制限（1分あたり30件程度）がある
-const PURGE_BATCH = 25;
-const PURGE_MAX = 100;
-const PURGE_WAIT_MS = 60 * 1000;
+const TEMPLATE_NS = 10;
+const isTemplateTitle = title => /^(?:Template|テンプレート)\s*:/i.test(title);
+// 編集したテンプレートを呼び出しているページの null edit（パージ・forcelinkupdate）。Bot には回数制限が無いが、
+// 試験用のウィキなどで制限に当たったら待ってやり直す
+const PURGE_BATCH = 30;
+const PURGE_MAX = 1000;
+const PURGE_PAUSE_MS = 1000;
+const RATELIMIT_WAIT_MS = 60 * 1000;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+/** 名前空間 10 の名前（テンプレート）をまとめて取り出す。titles は最大50件ずつ */
+async function templatesUsedBy(titles) {
+    const found = new Set();
+    for (let i = 0; i < titles.length; i += 50) {
+        for await (const res of bot.continuedQueryGen({
+            action: 'query',
+            titles: titles.slice(i, i + 50).join('|'),
+            prop: 'templates',
+            tlnamespace: TEMPLATE_NS,
+            tllimit: 'max',
+            formatversion: 2,
+        })) {
+            for (const p of res.query?.pages || []) for (const t of p.templates || []) found.add(t.title);
+        }
+    }
+    return [...found];
+}
+
+/** 本文に移動元のカテゴリを書いている（書き換えられる）ページだけを返す */
+async function pagesWritingCategory(titles, command) {
+    const hits = [];
+    for (let i = 0; i < titles.length; i += 50) {
+        const res = await bot.request({
+            action: 'query',
+            titles: titles.slice(i, i + 50).join('|'),
+            prop: 'revisions',
+            rvprop: 'content',
+            rvslots: 'main',
+            formatversion: 2,
+        });
+        for (const p of res.query?.pages || []) {
+            const content = p.revisions?.[0]?.slots?.main?.content;
+            if (typeof content === 'string' && applyCategoryCommand(content, command).changed) hits.push(p.title);
+        }
+    }
+    return hits;
+}
 
 /**
- * 移動元に残っているページを数える。テンプレート経由などで所属しているページは、テンプレートを直しても
- * 呼び出し先が更新（null edit）されるまでカテゴリに残るので、先にリンクの更新をしてから数え直す
- * @param {string} name 移動元
+ * テンプレート経由で移動元に入っているページ（変更なし）が使っているテンプレートのうち、本文に移動元のカテゴリを
+ * 書いているもの。<includeonly> で呼び出し先だけを分類するテンプレートは、それ自体はカテゴリに入らないので、
+ * カテゴリのメンバーからは見つからない
+ */
+async function findCategorizingTemplates(unchangedTitles, command, done) {
+    const candidates = (await templatesUsedBy(unchangedTitles)).filter(t => !done.has(t));
+    return candidates.length ? pagesWritingCategory(candidates, command) : [];
+}
+
+/** カテゴリにいま所属しているページ（全名前空間） */
+async function listMembers(name) {
+    const titles = [];
+    for await (const res of bot.continuedQueryGen({
+        action: 'query',
+        list: 'categorymembers',
+        cmtitle: `Category:${name}`,
+        cmprop: 'title',
+        cmlimit: 'max',
+        formatversion: 2,
+    })) {
+        for (const m of res.query?.categorymembers || []) titles.push(m.title);
+    }
+    return titles;
+}
+
+/** テンプレートを呼び出しているページ（全名前空間） */
+async function listTranscluders(template) {
+    const titles = [];
+    for await (const res of bot.continuedQueryGen({
+        action: 'query',
+        list: 'embeddedin',
+        eititle: template,
+        eilimit: 'max',
+        formatversion: 2,
+    })) {
+        for (const m of res.query?.embeddedin || []) titles.push(m.title);
+    }
+    return titles;
+}
+
+/**
+ * 編集したテンプレートを呼び出していて、まだ移動元に入っているページを null edit する。テンプレートを直しても、
+ * 呼び出し先のカテゴリの所属は、そのページのリンクが更新されるまで（ジョブキューが追いつくまで）変わらない
+ * @param {string[]} templates このコマンドで編集したテンプレート
+ * @returns {Promise<{purged: number, complete: boolean}>} complete=false は、上限を超えた・更新に失敗した
+ */
+async function refreshTransclusions(templates, from) {
+    if (templates.length === 0) return { purged: 0, complete: true };
+    const members = new Set(await listMembers(from));
+    const targets = new Set();
+    for (const t of templates) for (const p of await listTranscluders(t)) if (members.has(p)) targets.add(p);
+    const list = [...targets];
+    let purged = 0;
+    for (let i = 0; i < list.length && i < PURGE_MAX; i += PURGE_BATCH) {
+        if (i > 0) await sleep(PURGE_PAUSE_MS);
+        const batch = list.slice(i, i + PURGE_BATCH);
+        try {
+            await bot.purge(batch, { forcelinkupdate: true });
+        } catch (e) {
+            if (e.code !== 'ratelimited') {
+                logger.warning(taskId, `呼び出し先のページを更新できませんでした: ${e.message}`);
+                return { purged, complete: false };
+            }
+            await sleep(RATELIMIT_WAIT_MS);
+            i -= PURGE_BATCH; // 同じ分をやり直す
+            continue;
+        }
+        purged += batch.length;
+    }
+    return { purged, complete: list.length <= PURGE_MAX };
+}
+
+/**
+ * 移動元に残っているページを数える（キューページ・緊急停止ページは数えない。見出しにコロンなしの [[Category:…]] が
+ * あると、キューページ自体が所属するため）
  * @param {Set<string>} skipped このコマンドでスキップしたページ
- * @returns {Promise<{total: number, skipped: number, purged: boolean}>}
  */
 async function countRemaining(name, skipped) {
     const own = new Set([QUEUE_PAGE, EMERGENCY_STOP_PAGE].map(t => t.replace(/_/g, ' ')));
-    // キューページ自体（見出しにコロンなしの [[Category:…]] があると所属する）は数えない
-    const members = async () => (await listMembers(name)).filter(t => !own.has(t.replace(/_/g, ' ')));
-    let titles = await members();
-    let purged = true;
-    for (let i = 0; i < titles.length && i < PURGE_MAX; i += PURGE_BATCH) {
-        if (i > 0) await new Promise(r => setTimeout(r, PURGE_WAIT_MS));
-        try {
-            await bot.purge(titles.slice(i, i + PURGE_BATCH), { forcelinkupdate: true });
-        } catch (e) {
-            purged = false;
-            logger.warning(taskId, `残りのページを更新できませんでした: ${e.message}`);
-            break;
-        }
-    }
-    if (titles.length > PURGE_MAX) purged = false;
-    if (titles.length > 0) titles = await members();
-    return { total: titles.length, skipped: titles.filter(t => skipped.has(t)).length, purged };
+    const titles = (await listMembers(name)).filter(t => !own.has(t.replace(/_/g, ' ')));
+    return { total: titles.length, skipped: titles.filter(t => skipped.has(t)).length };
 }
 
 /**
@@ -366,51 +465,69 @@ async function executeSection(section, opts, record, resumed) {
     let recordFailed = false;
     let lastCheck = Date.now();
     let missingLogged = false;
-    for (const title of targets) {
-        if (!opts.dryRun && await isEmergencyStopped()) {
-            stopped = true;
-            break;
-        }
-        // 長く止まっていた間に実行中の印が古いとみなされ、他の実行に取られていたら、二重に編集しないよう止める
-        if (status.lockLost()) {
-            log('warning', '実行中の印を他の実行に取られたため止めます');
-            stopped = true;
-            break;
-        }
-        // 着手の印のある節を定期的に確かめる。見出しの変更（「Bot:」を外す異議を含む）や他の作業者の対応があれば中止する。
-        // 節が過去ログ化されただけなら依頼は有効なので続け、返信できなければ記録する
-        if (record.data.started && Date.now() - lastCheck >= SECTION_CHECK_INTERVAL_MS) {
-            lastCheck = Date.now();
-            const check = await checkStartedSection(section, id);
-            if (check.missing) {
-                if (!missingLogged) log('warning', `${check.reason}。処理は続けます`);
-                missingLogged = true;
-            } else if (!check.ok) {
-                aborted = `実行中に節が変わったため中止しました（${check.reason}）`;
-                break;
+    /** ページを順に処理する。止める・中止するときは false を返す */
+    const runPages = async titles => {
+        for (const title of titles) {
+            if (!opts.dryRun && await isEmergencyStopped()) {
+                stopped = true;
+                return false;
+            }
+            // 長く止まっていた間に実行中の印が古いとみなされ、他の実行に取られていたら、二重に編集しないよう止める
+            if (status.lockLost()) {
+                log('warning', '実行中の印を他の実行に取られたため止めます');
+                stopped = true;
+                return false;
+            }
+            // 着手の印のある節を定期的に確かめる。見出しの変更（「Bot:」を外す異議を含む）や他の作業者の対応があれば中止する。
+            // 節が過去ログ化されただけなら依頼は有効なので続け、返信できなければ記録する
+            if (record.data.started && Date.now() - lastCheck >= SECTION_CHECK_INTERVAL_MS) {
+                lastCheck = Date.now();
+                const check = await checkStartedSection(section, id);
+                if (check.missing) {
+                    if (!missingLogged) log('warning', `${check.reason}。処理は続けます`);
+                    missingLogged = true;
+                } else if (!check.ok) {
+                    aborted = `実行中に節が変わったため中止しました（${check.reason}）`;
+                    return false;
+                }
+            }
+            status.pageStart(title);
+            let ev;
+            let recordError = null;
+            try {
+                const r = await processPage(title, command, ctx);
+                ev = { title, result: r.changed ? 'edited' : 'unchanged', warnings: r.warnings, revid: r.revid, oldrevid: r.oldrevid };
+                recordError = r.recordError || null;
+            } catch (e) {
+                ev = { title, result: e.skip ? 'skipped' : 'error', message: e.message || String(e) };
+                log(e.skip ? 'info' : 'warning', `${title}: ${ev.message}`);
+            }
+            if (recordError) ev.message = recordError;
+            record.page(ev);
+            status.pageDone(ev);
+            if (recordError) {
+                // 編集は成功したが取り消しの記録が残らなかった。これ以上編集すると取り消せない編集が増えるので止める
+                record.log('error', `${title}: ${recordError}`);
+                logger.error(taskId, `[${id}] ${title}: ${recordError}`, false);
+                aborted = '取り消し用の記録を書き出せなかったため中止しました。運用者が確認します';
+                recordFailed = true;
+                return false;
             }
         }
-        status.pageStart(title);
-        let ev;
-        let recordError = null;
-        try {
-            const r = await processPage(title, command, ctx);
-            ev = { title, result: r.changed ? 'edited' : 'unchanged', warnings: r.warnings, revid: r.revid, oldrevid: r.oldrevid };
-            recordError = r.recordError || null;
-        } catch (e) {
-            ev = { title, result: e.skip ? 'skipped' : 'error', message: e.message || String(e) };
-            log(e.skip ? 'info' : 'warning', `${title}: ${ev.message}`);
-        }
-        if (recordError) ev.message = recordError;
-        record.page(ev);
-        status.pageDone(ev);
-        if (recordError) {
-            // 編集は成功したが取り消しの記録が残らなかった。これ以上編集すると取り消せない編集が増えるので止める
-            record.log('error', `${title}: ${recordError}`);
-            logger.error(taskId, `[${id}] ${title}: ${recordError}`, false);
-            aborted = '取り消し用の記録を書き出せなかったため中止しました。運用者が確認します';
-            recordFailed = true;
-            break;
+        return true;
+    };
+
+    if (await runPages(targets) && command.namespaces.includes(TEMPLATE_NS)) {
+        // テンプレート経由で移動元に残ったページ（変更なし）の原因のテンプレートも直す
+        const pages = readCommandRecord(DATA_DIR, id)?.pages || [];
+        const done = new Set(pages.map(p => p.title));
+        const unchanged = pages.filter(p => p.result === 'unchanged').map(p => p.title);
+        const templates = unchanged.length ? (await findCategorizingTemplates(unchanged, command, done)).slice(0, opts.maxPages) : [];
+        if (templates.length > 0) {
+            log('info', `テンプレート経由で所属しているページの原因のテンプレート${templates.length}件も書き換えます`, true);
+            record.setCommand(command, discussionLink, record.data.total + templates.length);
+            status.data.current.total += templates.length;
+            await runPages(templates);
         }
     }
 
@@ -420,10 +537,14 @@ async function executeSection(section, opts, record, resumed) {
 
     const notes = [];
     if (command.type === 'reassign' && !opts.dryRun) {
-        // 再開した場合も含め、このコマンドでスキップしたページ
-        const skipped = new Set((readCommandRecord(DATA_DIR, id)?.pages || []).filter(p => p.result === 'skipped').map(p => p.title));
+        // 再開した場合も含め、このコマンドでスキップしたページと、編集したテンプレート
+        const pages = readCommandRecord(DATA_DIR, id)?.pages || [];
+        const skipped = new Set(pages.filter(p => p.result === 'skipped').map(p => p.title));
+        const editedTemplates = pages.filter(p => p.result === 'edited' && isTemplateTitle(p.title)).map(p => p.title);
+        const refresh = await refreshTransclusions(editedTemplates, command.from);
+        if (refresh.purged > 0) log('info', `編集したテンプレートを呼び出しているページ${refresh.purged}件を更新（null edit）しました`);
         const left = await countRemaining(command.from, skipped);
-        const note = left.purged ? '' : '（一部のページは更新できていないため、実際より多いことがあります）';
+        const note = refresh.complete ? '' : '（テンプレートを呼び出しているページの一部はまだ更新されていないため、実際より多いことがあります）';
         if (left.total === 0) notes.push(`${catLink(command.from)}は空になりました。`);
         else if (left.skipped > 0) notes.push(`${catLink(command.from)}にはまだ${left.total}件が所属しています（うち{{nobots}}などでスキップしたページ${left.skipped}件）。${note}`);
         else notes.push(`${catLink(command.from)}にはまだ${left.total}件が所属しています。${note}`);

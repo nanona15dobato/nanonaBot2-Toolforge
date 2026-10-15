@@ -12,8 +12,9 @@
 const WikitextParser = require('../parse2');
 const { bareCategoryName } = require('./title');
 
-// 「Bot:」だけの場合の対象名前空間（QueueBotと同じく標準・Category）
-const DEFAULT_NAMESPACES = [0, 14];
+// 「Bot:」だけの場合の対象名前空間（標準・Template・Category）。テンプレートを直したときは、呼び出しているページを
+// null edit して、カテゴリの所属をすぐ反映させる（category-queue.js）
+const DEFAULT_NAMESPACES = [0, 10, 14];
 const NAMESPACES_BY_SCOPE = { '記事': [0], 'カテゴリ': [14] };
 const NON_DISCUSSION_PREFIX = /^\s*:?\s*(?:category|カテゴリ|file|ファイル|画像|image|user|利用者|user[ _]talk|利用者[‐-]会話|special|特別)\s*:/i;
 const parser = new WikitextParser();
