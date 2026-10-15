@@ -288,3 +288,27 @@ test('コマンドの記録と読み出し', () => {
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+
+// ==========================================
+// 動かすウィキ（--site）
+// ==========================================
+test('--site: 試験用のウィキを選び、認証情報はウィキごとの環境変数から読む', () => {
+    const { resolveSite, siteCredentials, TEST_DATA_DIRS } = require('../src/utils/categoryQueue/sites');
+    const ja = resolveSite([]);
+    assert.equal(ja.name, 'ja');
+    assert.equal(ja.search, 'cirrus');
+    const ptw = resolveSite(['--site', 'ptw', '--dry-run']);
+    assert.equal(new URL(ptw.apiUrl).hostname, 'publictestwiki.com');
+    assert.equal(ptw.search, 'embeddedin');
+    assert.equal(ptw.assertBot, false);
+    assert.equal(resolveSite(['--site', 'ptw', '--queue-page', 'User:A/Q']).queuePage, 'User:A/Q');
+    assert.throws(() => resolveSite(['--site', 'nope']));
+
+    const env = { MW_NBOT2_USERNAME: 'Bot2', MW_NBOT2_PASSWORD: 'p2', MW_USERNAME: 'U', MW_PASSWORD: 'p' };
+    assert.deepEqual(siteCredentials(ja, env), { username: 'Bot2', password: 'p2' });
+    assert.deepEqual(siteCredentials(ja, { MW_USERNAME: 'U', MW_PASSWORD: 'p' }), { username: 'U', password: 'p' });
+    // publictestwiki は Wikimedia とアカウントが別なので、Wikimedia の認証情報を使わない
+    assert.deepEqual(siteCredentials(ptw, env), { username: undefined, password: undefined });
+    assert.deepEqual(siteCredentials(ptw, { ...env, MW_PTW_USERNAME: 'Me@bot', MW_PTW_PASSWORD: 'x' }), { username: 'Me@bot', password: 'x' });
+    assert.deepEqual(TEST_DATA_DIRS, ['data/category-queue-test', 'data/category-queue-ptw']);
+});

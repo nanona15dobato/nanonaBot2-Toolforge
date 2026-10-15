@@ -12,6 +12,7 @@
  *   node category-queue.js --no-report     キューページに返信しない
  *   node category-queue.js --rollback <ID> 指定IDのコマンドで行った編集を取り消す
  *   node category-queue.js --site test     test.wikipedia.org の試験用キューで動かす（scripts/queue-test-setup.js で用意）
+ *   node category-queue.js --site ptw      publictestwiki.com の試験用キューで動かす（同上。認証情報は MW_PTW_USERNAME / MW_PTW_PASSWORD）
  *   node category-queue.js --queue-page <ページ名> --stop-page <ページ名>  キューページ・緊急停止ページを変える
  */
 const fs = require('fs');
@@ -28,46 +29,12 @@ const { editSummary, formatReply, formatStart, catLink } = require('./utils/cate
 const { CommandRecord, readCommandRecord, reopenCommandRecord, listCommandRecords, updateCommandRecord, SkipIndex } = require('./utils/categoryQueue/record');
 const { identifyRequester } = require('./utils/categoryQueue/requester');
 const { QueueStatus } = require('./utils/categoryQueue/status');
+const { SITES, resolveSite, siteCredentials } = require('./utils/categoryQueue/sites');
 const taskId = 'w-ja-nn5';
 const nnversion = '__FILE_HASH__';
 
-/**
- * 動かすウィキ（--site）
- * - ja:   本番。日本語版ウィキペディアのキュー
- * - test: 試験。test.wikipedia.org の利用者ページにキューを置き、試験用のカテゴリ・記事で実際に編集する
- *         （scripts/queue-test-setup.js で用意する。Bot フラグが無いので assert=bot は付けず、メタの稼働スイッチも見ない）
- * どちらも --queue-page / --stop-page でページを変えられる（例: jawp の利用者サンドボックスにキューを置いて --dry-run）
- */
-const SITES = {
-    ja: {
-        apiUrl: 'https://ja.wikipedia.org/w/api.php',
-        queuePage: 'プロジェクト:カテゴリ関連/キュー',
-        stopPage: 'プロジェクト:カテゴリ関連/キュー/緊急停止',
-        dataDir: 'data/category-queue',
-        assertBot: true,
-        taskSwitch: true,
-    },
-    test: {
-        apiUrl: 'https://test.wikipedia.org/w/api.php',
-        queuePage: 'User:NanonaBot2/カテゴリキュー',
-        stopPage: 'User:NanonaBot2/カテゴリキュー/緊急停止',
-        dataDir: 'data/category-queue-test',
-        assertBot: false,
-        taskSwitch: false,
-    },
-};
-
-/** --site / --queue-page / --stop-page を、Bot を作る前に読む */
-function resolveSite(argv) {
-    const value = name => {
-        const i = argv.indexOf(name);
-        return i === -1 ? null : argv[i + 1];
-    };
-    const name = value('--site') || 'ja';
-    if (!SITES[name]) throw new Error(`--site は ${Object.keys(SITES).join(' / ')} のどれかです`);
-    return { name, ...SITES[name], queuePage: value('--queue-page') || SITES[name].queuePage, stopPage: value('--stop-page') || SITES[name].stopPage };
-}
-
+// 動かすウィキ（--site ja / test / ptw）は utils/categoryQueue/sites.js を参照。
+// どれも --queue-page / --stop-page でページを変えられる（例: jawp の利用者サンドボックスにキューを置いて --dry-run）
 const SITE = resolveSite(process.argv.slice(2));
 const QUEUE_PAGE = SITE.queuePage;
 // 本文（コメントを除く）が「動作中」のときだけ編集する
@@ -80,8 +47,7 @@ const SECTION_CHECK_INTERVAL_MS = Number(process.env.CATEGORY_QUEUE_CHECK_MS) ||
 
 const bot = applyEditThrottle(new Mwn({
     apiUrl: SITE.apiUrl,
-    username: process.env.MW_NBOT2_USERNAME || process.env.MW_USERNAME,
-    password: process.env.MW_NBOT2_PASSWORD || process.env.MW_PASSWORD,
+    ...siteCredentials(SITE),
     userAgent: `nanonaBot2/CategoryQueue [${nnversion}] (Toolforge)`,
     defaultParams: SITE.assertBot ? { assert: 'bot' } : {},
 }), { priority: 'low' });
@@ -182,7 +148,19 @@ async function listTargets(command) {
     })) {
         for (const m of res.query?.categorymembers || []) titles.set(m.title, true);
     }
-    if (command.namespaces.includes(0)) {
+    if (command.namespaces.includes(0) && SITE.search === 'embeddedin') {
+        // CirrusSearch の無いウィキ: テンプレートを使っているページをすべて対象にする
+        for await (const res of bot.continuedQueryGen({
+            action: 'query',
+            list: 'embeddedin',
+            eititle: `Template:${REDIRECT_CATEGORY_TEMPLATES[0]}`,
+            einamespace: 0,
+            eilimit: 'max',
+            formatversion: 2,
+        })) {
+            for (const m of res.query?.embeddedin || []) titles.set(m.title, true);
+        }
+    } else if (command.namespaces.includes(0)) {
         const search = `insource:"${command.from.replace(/"/g, '')}" hastemplate:"${REDIRECT_CATEGORY_TEMPLATES[0]}"`;
         for await (const res of bot.continuedQueryGen({
             action: 'query',
@@ -739,6 +717,7 @@ async function rollback(id, opts) {
     let reason = 'エラー';
     try {
         status.save();
+        if (!bot.options.username) throw new Error(`認証情報がありません（環境変数 ${SITE.credentials.map(p => `${p}_USERNAME / ${p}_PASSWORD`).join(' または ')}）`);
         await bot.login();
         const userinfo = await bot.userinfo();
         opts.botUser = userinfo.name;

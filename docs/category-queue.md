@@ -193,7 +193,7 @@
 | 取得元 | API | 条件 |
 | --- | --- | --- |
 | カテゴリのメンバー | `list=categorymembers`、`cmtitle=Category:A`、続きもすべて | `cmnamespace` = 対象名前空間 |
-| リダイレクトの所属カテゴリ | `list=search`、`insource:"A" hastemplate:"リダイレクトの所属カテゴリ"` | 対象に標準名前空間を含むときだけ。検索は標準名前空間のみ |
+| リダイレクトの所属カテゴリ | `list=search`、`insource:"A" hastemplate:"リダイレクトの所属カテゴリ"` | 対象に標準名前空間を含むときだけ。検索は標準名前空間のみ。CirrusSearch の無いウィキ（`--site ptw`）では、代わりに `list=embeddedin` でテンプレートを使っている標準名前空間のページをすべて対象にする（10.1） |
 
 - 重複を除き、取得した順に処理します。
 - テンプレート経由で所属しているページもメンバーとして取れます。本文に直接の指定が無ければ「変更なし」になり、返信で要確認として挙げます。
@@ -374,18 +374,22 @@ node dist/category-queue.js --rollback <ID>        # 取り消し
 
 返信しない実行では節に `{{BOTREQ}}` が付かないため、次の通常実行でもう一度対象になります（付け替え済みのページは移動元から外れているので二重編集にはなりません）。
 
-### 10.1 試験（test.wikipedia.org）
+### 10.1 試験（test.wikipedia.org / publictestwiki.com）
 
-本番の jawp では記事・カテゴリを実際に編集するので、試験は test.wikipedia.org で行います。`--site test` を付けると、次のように切り替わります。
+本番の jawp では記事・カテゴリを実際に編集するので、試験は試験用のウィキで行います。`--site test`（test.wikipedia.org）か `--site ptw`（[publictestwiki.com](https://publictestwiki.com/)、TestWiki）を付けると、次のように切り替わります。設定は `src/utils/categoryQueue/sites.js` にまとめています。
 
-| 項目 | 本番（`--site ja`、既定） | 試験（`--site test`） |
-| --- | --- | --- |
-| ウィキ | ja.wikipedia.org | test.wikipedia.org |
-| キューページ | プロジェクト:カテゴリ関連/キュー | User:NanonaBot2/カテゴリキュー |
-| 緊急停止ページ | プロジェクト:カテゴリ関連/キュー/緊急停止 | User:NanonaBot2/カテゴリキュー/緊急停止 |
-| 記録 | `data/category-queue/` | `data/category-queue-test/`（Web の詳細ページは両方を探す） |
-| `assert=bot` | 付ける | 付けない（testwiki には Bot フラグが無い） |
-| メタの稼働スイッチ | 確かめる | 確かめない |
+| 項目 | 本番（`--site ja`、既定） | 試験（`--site test`） | 試験（`--site ptw`） |
+| --- | --- | --- | --- |
+| ウィキ | ja.wikipedia.org | test.wikipedia.org | publictestwiki.com |
+| キューページ | プロジェクト:カテゴリ関連/キュー | User:NanonaBot2/カテゴリキュー | User:Nanona15dobato/カテゴリキュー |
+| 緊急停止ページ | プロジェクト:カテゴリ関連/キュー/緊急停止 | User:NanonaBot2/カテゴリキュー/緊急停止 | User:Nanona15dobato/カテゴリキュー/緊急停止 |
+| 認証情報 | `MW_NBOT2_USERNAME` / `MW_NBOT2_PASSWORD`（無ければ `MW_USERNAME` / `MW_PASSWORD`） | 本番と同じ（Wikimedia の統一ログイン） | `MW_PTW_USERNAME` / `MW_PTW_PASSWORD`（Wikimedia とはアカウントが別。Wikimedia の認証情報は使わない） |
+| 記録 | `data/category-queue/` | `data/category-queue-test/` | `data/category-queue-ptw/`（Web の詳細ページは本番 → 試験の順に探す） |
+| `{{リダイレクトの所属カテゴリ}}` の対象の探し方（4章） | CirrusSearch の `insource:` | 同左 | テンプレートを使っているページすべて（`list=embeddedin`。CirrusSearch が無いため。カテゴリ名を含まないページは「変更なし」になる） |
+| `assert=bot` | 付ける | 付けない（Bot フラグが無い） | 付けない |
+| メタの稼働スイッチ | 確かめる | 確かめない | 確かめない |
+
+publictestwiki.com では、Bot は `MW_PTW_USERNAME` のアカウント（例: 利用者 Nanona15dobato の Bot パスワード `Nanona15dobato@<名前>`）で編集します。Bot パスワードは publictestwiki.com の Special:BotPasswords で、ページの編集（高額な編集を含む）の権限を付けて作ってください。ログインした利用者名で `{{bots}}` を判定するので、記事3（`{{nobots}}`）の結果は変わりません。
 
 `--queue-page` と `--stop-page` で、キューページと緊急停止ページを個別に変えられます。jawp の利用者サンドボックスにキューを置いて `--dry-run` で読ませれば、本番の記事を編集せずに見出しの解釈や依頼者の特定を確かめられます。
 
@@ -397,6 +401,11 @@ node scripts/queue-test-setup.js                      # testwiki に試験用の
 node dist/category-queue.js --site test --dry-run     # 編集せずに確かめる
 node dist/category-queue.js --site test               # 実際に着手・編集・返信する
 node dist/category-queue.js --site test --rollback <ID>
+
+# publictestwiki.com では、どれにも --site ptw を付ける
+node scripts/queue-test-setup.js --site ptw
+node dist/category-queue.js --site ptw --dry-run
+node dist/category-queue.js --site ptw
 ```
 
 `queue-test-setup.js` が作るもの（名前はすべて「NanonaBot2キュー試験」で始まる）:
@@ -408,13 +417,13 @@ node dist/category-queue.js --site test --rollback <ID>
 | 記事2 | 空白だけのソートキー（`| `）の引き継ぎ |
 | 記事3 | `{{nobots}}`（編集できなかったとして報告） |
 | 記事4 | 移動先が既にある（移動元のタグを消すだけ） |
-| 記事5 | `{{リダイレクトの所属カテゴリ}}` の引数（検索で見つけて書き換える。索引に載るまで数分かかることがある） |
+| 記事5 | `{{リダイレクトの所属カテゴリ}}` の引数（testwiki では検索で見つける。索引に載るまで数分かかることがある。ptw ではテンプレートを使っているページとして見つける） |
 | 議論 | 編集要約にリンクされる議論場所 |
 | キューページ | 再配属・(記事)除去・不受理（コロンなし）・不可能（移動先が無い）・不受理（複製）・異議あり（「Bot:」なし）の6節 |
 
 キューの節は準備したアカウントの署名になるので、依頼者と署名は一致します。署名の偽装を試すには、別のアカウントで、他人の署名を付けた節を足してください。
 
-偽のウィキを使った予行演習で、上の手順どおりの結果になることを確かめています。このとき、キューページ自体が対象になる問題が見つかりました。見出しにコロンなしの `[[Category:…]]` があると、キューページがそのカテゴリに入るためです。キューページと緊急停止ページは、常に対象から外すように直しました。
+偽のウィキを使った予行演習で、上の手順どおりの結果になることを確かめています（`--site ptw` も同じ結果。記事5は `embeddedin` で見つかる）。このとき、キューページ自体が対象になる問題が見つかりました。見出しにコロンなしの `[[Category:…]]` があると、キューページがそのカテゴリに入るためです。キューページと緊急停止ページは、常に対象から外すように直しました。
 
 ### 10.2 稼働開始までの手順
 
