@@ -104,6 +104,8 @@ node dist/category-queue.js --rollback <ID>        # 取り消し
 npm test                                           # 解析・置換のテスト
 node scripts/queue-test-setup.js                   # test.wikipedia.org に試験用のページを作る
 node dist/category-queue.js --site test             # testwiki の試験用キューで実際に動かす
+node scripts/queue-test-setup.js --site ptw        # publictestwiki.com に試験用のページを作る
+node dist/category-queue.js --site ptw              # publictestwiki.com の試験用キューで実際に動かす
 ```
 
 ## 必要なもの
@@ -128,6 +130,7 @@ MediaWikiの認証情報は環境変数で設定します。
 | `MW_NBOT2_USERNAME` | nanonaBot2専用ユーザー名。設定時は `MW_USERNAME` より優先 |
 | `MW_NBOT2_PASSWORD` | nanonaBot2専用パスワード。設定時は `MW_PASSWORD` より優先 |
 | `MW_NBOT1_USERNAME` / `MW_NBOT1_PASSWORD` | `subster.js` 用の優先認証情報 |
+| `MW_PTW_USERNAME` / `MW_PTW_PASSWORD` | カテゴリキューの試験（`--site ptw`、publictestwiki.com）用 |
 | `TOOL_REPLICA_USER` | レプリカDBユーザー名 |
 | `TOOL_REPLICA_PASSWORD` | レプリカDBパスワード |
 
