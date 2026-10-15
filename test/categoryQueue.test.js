@@ -313,3 +313,16 @@ test('--site: 試験用のウィキを選び、認証情報はウィキごとの
     assert.deepEqual(siteCredentials(ptw, { ...env, MW_PTW_USERNAME: 'Me@bot', MW_PTW_PASSWORD: 'x' }), { username: 'Me@bot', password: 'x' });
     assert.deepEqual(TEST_DATA_DIRS, ['data/category-queue-test', 'data/category-queue-ptw']);
 });
+
+test('{{リダイレクトの所属カテゴリ}}: 21件目以降（モジュール化後）を含むグループも書き換える', () => {
+    const args = Array.from({ length: 25 }, (_, i) => `|1-${i + 1}=C${i + 1}`).join('\n');
+    const text = `{{リダイレクトの所属カテゴリ\n|redirect1=R\n${args}\n}}`;
+    const moved = apply(text, 'reassign', 'C23', ['新']);
+    assert.equal(moved.changed, true);
+    assert.deepEqual(moved.warnings, []);
+    assert.match(moved.text, /\|1-23=新\n/);
+    const removed = apply(text, 'remove', 'C3');
+    assert.match(removed.text, /\|1-3=C4\n/);
+    assert.match(removed.text, /\|1-24=C25\n\}\}/);
+    assert.doesNotMatch(removed.text, /1-25/);
+});

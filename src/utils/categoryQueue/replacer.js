@@ -15,7 +15,6 @@ const { bareCategoryName } = require('./title');
 const REDIRECT_CATEGORY_TEMPLATES = ['リダイレクトの所属カテゴリ'];
 const IMAGE_REQUEST_TEMPLATES = ['画像提供依頼', '画像募集中', '画像改訂依頼'];
 const IMAGE_REQUEST_SUFFIX = 'の画像提供依頼';
-const MAX_REDIRECT_CATEGORIES = 20;
 
 const parser = new WikitextParser();
 /**
@@ -175,11 +174,8 @@ function replaceInRedirectCategoryTemplates(text, op, warnings) {
             const values = filled.map(s => s.value);
             const next = transformList(values, op);
             if (!next) { remaining += values.length; continue; }
-            if (next.length > MAX_REDIRECT_CATEGORIES) {
-                warnings.push(`{{リダイレクトの所属カテゴリ}}のカテゴリが${MAX_REDIRECT_CATEGORIES}件を超えるため書き換えませんでした`);
-                remaining += values.length;
-                continue;
-            }
+            // 件数の上限は設けない。再配属・除去では件数が増えないので、21件目以降（テンプレートがモジュール化されると
+            // 使えるようになる）を含むグループも、そのまま書き換えてよい
             remaining += next.length;
             if (next.length === 0 && group !== 'positional') {
                 warnings.push(`{{リダイレクトの所属カテゴリ}}の redirect${group} にカテゴリが残っていません`);

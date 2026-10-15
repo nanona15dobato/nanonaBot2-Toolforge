@@ -149,7 +149,7 @@ async function listTargets(command) {
         for (const m of res.query?.categorymembers || []) titles.set(m.title, true);
     }
     if (command.namespaces.includes(0) && SITE.search === 'backlinks') {
-        // テンプレートは引数のカテゴリにリンクを出す（各グループ20件まで）。リンク表から、カテゴリにリンクしていて
+        // テンプレートは引数のカテゴリにリンクを出す（今は各グループ20件まで。モジュール化で21件目以降も出る）。リンク表から、カテゴリにリンクしていて
         // テンプレートを使っているページだけを拾う（検索の索引の遅れ・件数の上限・部分一致の余分が無い）
         for await (const res of bot.continuedQueryGen({
             action: 'query',
@@ -206,7 +206,7 @@ async function processPage(title, command, ctx) {
         return { text: replaced.text, summary: ctx.summary, minor: true, watchlist: 'nochange' };
     }, { ...EDIT_CONFIG });
 
-    // 書き換えなかったページでも、警告（{{リダイレクトの所属カテゴリ}}の件数超過など）は要確認として残す
+    // 書き換えなかったページでも、警告（画像提供依頼の表せない移動先など）は要確認として残す
     if (!res || res.result === 'aborted' || res.nochange) return { changed: false, warnings: replaced ? replaced.warnings : [] };
     if (res.result !== 'Success') throw new Error(`保存に失敗しました (${res.result})`);
     const result = { changed: true, warnings: replaced.warnings, revid: res.newrevid, oldrevid: res.oldrevid };
