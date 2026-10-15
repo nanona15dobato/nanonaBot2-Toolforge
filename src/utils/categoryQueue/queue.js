@@ -12,10 +12,14 @@
 const WikitextParser = require('../parse2');
 const { bareCategoryName } = require('./title');
 
-// 「Bot:」だけの場合の対象名前空間（標準・Template・Category）。テンプレートを直したときは、呼び出しているページを
-// null edit して、カテゴリの所属をすぐ反映させる（category-queue.js）
-const DEFAULT_NAMESPACES = [0, 10, 14];
-const NAMESPACES_BY_SCOPE = { '記事': [0], 'カテゴリ': [14] };
+// 対象名前空間。null はすべての名前空間（「Bot:」だけの場合）。
+// (記事) は標準に加えて Template も対象にする（テンプレート経由で記事を分類しているテンプレートを直すため。
+// 直したテンプレートの呼び出し先は null edit して、カテゴリの所属をすぐ反映させる。category-queue.js）
+const DEFAULT_NAMESPACES = null;
+const NAMESPACES_BY_SCOPE = { '記事': [0, 10], 'カテゴリ': [14] };
+
+/** その名前空間が対象か（namespaces が null ならすべて対象） */
+const includesNamespace = (namespaces, ns) => namespaces === null || namespaces.includes(ns);
 const NON_DISCUSSION_PREFIX = /^\s*:?\s*(?:category|カテゴリ|file|ファイル|画像|image|user|利用者|user[ _]talk|利用者[‐-]会話|special|特別)\s*:/i;
 const parser = new WikitextParser();
 
@@ -143,7 +147,7 @@ function normalizeSpaces(s) {
 /**
  * 見出しをコマンドとして解釈する
  * @param {string} heading
- * @returns {{ok: true, command: {type: string, from: string, to: string[], namespaces: number[], scope: string|null}} | {ok: false, error: string}}
+ * @returns {{ok: true, command: {type: string, from: string, to: string[], namespaces: number[]|null, scope: string|null}} | {ok: false, error: string}}
  */
 function parseCommandHeading(heading) {
     let rest = normalizeSpaces(heading);
@@ -199,7 +203,7 @@ function parseCommandHeading(heading) {
     if (to.includes(from.name)) return { ok: false, error: '移動元と移動先が同じカテゴリです' };
 
     const namespaces = scope ? NAMESPACES_BY_SCOPE[scope] : DEFAULT_NAMESPACES;
-    return { ok: true, command: { type, from: from.name, to, namespaces: [...namespaces], scope } };
+    return { ok: true, command: { type, from: from.name, to, namespaces: namespaces && [...namespaces], scope } };
 }
 
 /**
@@ -229,6 +233,7 @@ function insertReply(wikitext, section, reply) {
 
 module.exports = {
     DEFAULT_NAMESPACES,
+    includesNamespace,
     parseQueueSections,
     isBotHeading,
     isHandled,

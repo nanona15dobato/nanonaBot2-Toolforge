@@ -12,11 +12,11 @@ const apply = (text, type, from, to = []) => applyCategoryCommand(text, { type, 
 // ==========================================
 test('再配属・除去の見出しを解釈する', () => {
     const cases = [
-        ['Bot: [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], [0, 10, 14]],
-        ['Bot: (記事) [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], [0]],
+        ['Bot: [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], null],
+        ['Bot: (記事) [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], [0, 10]],
         ['Bot:&nbsp;(カテゴリ) [[:Category:Name1]]を[[:Category:Name2]]へ', 'reassign', 'Name1', ['Name2'], [14]],
-        ['Bot: [[:Category:Name1]]を除去', 'remove', 'Name1', [], [0, 10, 14]],
-        ['Bot: [[:Category:日本の_橋]] を [[:カテゴリ:日本の橋梁|橋梁]] へ', 'reassign', '日本の 橋', ['日本の橋梁'], [0, 10, 14]],
+        ['Bot: [[:Category:Name1]]を除去', 'remove', 'Name1', [], null],
+        ['Bot: [[:Category:日本の_橋]] を [[:カテゴリ:日本の橋梁|橋梁]] へ', 'reassign', '日本の 橋', ['日本の橋梁'], null],
     ];
     for (const [heading, type, from, to, namespaces] of cases) {
         const r = queue.parseCommandHeading(heading);

@@ -80,9 +80,9 @@ node scripts/task-registry.js check
 
 | 見出し | 動作 | 対象名前空間 |
 | --- | --- | --- |
-| `Bot: [[:Category:A]]を[[:Category:B]]へ` | 再配属（移動先は1つ） | 標準・Template・Category |
-| `Bot: (記事) …へ` / `Bot: (カテゴリ) …へ` | 再配属 | 標準のみ / Categoryのみ |
-| `Bot: [[:Category:A]]を除去` | 除去 | 標準・Template・Category |
+| `Bot: [[:Category:A]]を[[:Category:B]]へ` | 再配属（移動先は1つ） | すべて |
+| `Bot: (記事) …へ` / `Bot: (カテゴリ) …へ` | 再配属 | 標準・Template / Categoryのみ |
+| `Bot: [[:Category:A]]を除去` | 除去 | すべて |
 
 複数の移動先（`…と…へ`）と複製（`…に複製`）は受け付けません（不受理として返信）。
 

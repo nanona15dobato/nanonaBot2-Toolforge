@@ -24,7 +24,7 @@ const { allowBots } = require('./utils/parse.js');
 const { checkTaskStatusAndExit } = require('./utils/getTasks');
 const { logger } = require('./utils/logger');
 const queue = require('./utils/categoryQueue/queue');
-const { applyCategoryCommand, REDIRECT_CATEGORY_TEMPLATES, IMAGE_REQUEST_SUFFIX } = require('./utils/categoryQueue/replacer');
+const { applyCategoryCommand, REDIRECT_CATEGORY_TEMPLATES } = require('./utils/categoryQueue/replacer');
 const { editSummary, formatReply, formatStart, catLink } = require('./utils/categoryQueue/report');
 const { CommandRecord, readCommandRecord, reopenCommandRecord, listCommandRecords, updateCommandRecord, SkipIndex } = require('./utils/categoryQueue/record');
 const { identifyRequester } = require('./utils/categoryQueue/requester');
@@ -291,14 +291,14 @@ async function listTargets(command) {
         action: 'query',
         list: 'categorymembers',
         cmtitle: `Category:${command.from}`,
-        cmnamespace: command.namespaces.join('|'),
+        ...(command.namespaces ? { cmnamespace: command.namespaces.join('|') } : {}),
         cmprop: 'title',
         cmlimit: 'max',
         formatversion: 2,
     })) {
         for (const m of res.query?.categorymembers || []) titles.set(m.title, true);
     }
-    if (command.namespaces.includes(0) && SITE.search === 'backlinks') {
+    if (queue.includesNamespace(command.namespaces, 0) && SITE.search === 'backlinks') {
         // テンプレートは引数のカテゴリにリンクを出す（今は各グループ20件まで。モジュール化で21件目以降も出る）。リンク表から、カテゴリにリンクしていて
         // テンプレートを使っているページだけを拾う（検索の索引の遅れ・件数の上限・部分一致の余分が無い）
         for await (const res of bot.continuedQueryGen({
@@ -315,7 +315,7 @@ async function listTargets(command) {
             // prop の続きの取得では、テンプレートの情報が別の回に付くことがあるので、付いた回で拾う
             for (const p of res.query?.pages || []) if (p.templates?.length) titles.set(p.title, true);
         }
-    } else if (command.namespaces.includes(0)) {
+    } else if (queue.includesNamespace(command.namespaces, 0)) {
         // テンプレートが無い（リンクが出ない）試験用のウィキ: テンプレートを使っているページをすべて対象にする
         for await (const res of bot.continuedQueryGen({
             action: 'query',
@@ -423,9 +423,6 @@ async function executeSection(section, opts, record, resumed) {
         return { status: '不受理', message: '議論場所へのリンクがありません。申請文に議論場所へのリンクを記載してください' };
     }
 
-    // {{画像提供依頼}}はノートページに貼られるため、全名前空間指定ではノートも対象にする
-    if (command.scope === null && command.from.endsWith(IMAGE_REQUEST_SUFFIX)) command.namespaces.push(1);
-
     for (const to of command.to) {
         if (!await pageExists(`Category:${to}`)) {
             return { status: '不可能', message: `${catLink(to)}が存在しません。先にカテゴリを作成（または移動）してください` };
@@ -517,7 +514,7 @@ async function executeSection(section, opts, record, resumed) {
         return true;
     };
 
-    if (await runPages(targets) && command.namespaces.includes(TEMPLATE_NS)) {
+    if (await runPages(targets) && queue.includesNamespace(command.namespaces, TEMPLATE_NS)) {
         // テンプレート経由で移動元に残ったページ（変更なし）の原因のテンプレートも直す
         const pages = readCommandRecord(DATA_DIR, id)?.pages || [];
         const done = new Set(pages.map(p => p.title));
