@@ -46,12 +46,16 @@ test('記録を開き直すとき、件数はページの結果から数え直�
         rec.page({ title: 'p1', result: 'edited', warnings: ['w'] });
         rec.page({ title: 'p2', result: 'error', message: 'x' });
         // ページごとに概要も書き出している
-        assert.deepEqual(readCommandRecord(dir, ID).record.counts, { edited: 1, unchanged: 0, warnings: 1, errors: 1 });
+        assert.deepEqual(readCommandRecord(dir, ID).record.counts, { edited: 1, unchanged: 0, skipped: 0, warnings: 1, errors: 1 });
 
         // 概要を書く前に落ちた場合を模す（ページの結果だけ1件多い）
         fs.appendFileSync(path.join(dir, 'commands', `${ID}.pages.jsonl`), JSON.stringify({ title: 'p3', result: 'unchanged' }) + '\n');
+        fs.appendFileSync(path.join(dir, 'commands', `${ID}.pages.jsonl`), JSON.stringify({ title: 'p4', result: 'skipped', message: 'nobots' }) + '\n');
         const reopened = reopenCommandRecord(dir, ID, { dryRun: false });
-        assert.deepEqual(reopened.data.counts, { edited: 1, unchanged: 1, warnings: 1, errors: 1 });
+        // {{nobots}} はエラーではなくスキップとして数える
+        assert.deepEqual(reopened.data.counts, { edited: 1, unchanged: 1, skipped: 1, warnings: 1, errors: 1 });
+        reopened.page({ title: 'p5', result: 'skipped' });
+        assert.equal(reopened.data.counts.skipped, 2);
         assert.equal(reopened.data.state, 'running');
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });

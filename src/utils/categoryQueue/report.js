@@ -27,10 +27,11 @@ function detailUrl(id) {
     return `${WEB_BASE}/queue/${encodeURIComponent(id)}`;
 }
 
-/** 「12件を編集しました（変更なし3件・要確認1件・エラー1件）。」 */
+/** 「12件を編集しました（変更なし3件・スキップ1件・要確認1件・エラー1件）。」 */
 function countsText(counts) {
     const extra = [
         counts.unchanged ? `変更なし${counts.unchanged}件` : null,
+        counts.skipped ? `スキップ${counts.skipped}件` : null,
         counts.warnings ? `要確認${counts.warnings}件` : null,
         counts.errors ? `エラー${counts.errors}件` : null,
     ].filter(Boolean);
@@ -44,7 +45,7 @@ function countsText(counts) {
  * @param {'完了'|'不受理'|'不可能'|'中止'} p.status {{BOTREQ}}の引数
  * @param {string} [p.message] 不受理・中止などの理由
  * @param {string} [p.id]
- * @param {{edited: number, unchanged: number, warnings: number, errors: number}} [p.counts] 編集した件数（完了・途中で中止したとき）
+ * @param {{edited: number, unchanged: number, skipped?: number, warnings: number, errors: number}} [p.counts] 編集した件数（完了・途中で中止したとき）
  * @param {string[]} [p.notes] 追記事項（「Category:Name1 は空になりました。」など）
  */
 function formatReply({ status, message, id, counts, notes = [] }) {

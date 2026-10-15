@@ -126,9 +126,60 @@ async function pageExists(title) {
     return !page.missing && !page.invalid;
 }
 
-async function categoryInfo(name) {
-    const res = await bot.request({ action: 'query', titles: `Category:${name}`, prop: 'categoryinfo', formatversion: 2 });
-    return res.query.pages[0]?.categoryinfo || { size: 0, pages: 0, subcats: 0, files: 0 };
+/** {{bots}}/{{nobots}} で編集を拒否しているページ。Bot が正しく除外したものなので、エラーではなく「スキップ」にする */
+function skipError() {
+    const e = new Error('{{bots}}/{{nobots}}により編集が拒否されているためスキップしました');
+    e.skip = true;
+    return e;
+}
+
+/** カテゴリにいま所属しているページ（全名前空間） */
+async function listMembers(name) {
+    const titles = [];
+    for await (const res of bot.continuedQueryGen({
+        action: 'query',
+        list: 'categorymembers',
+        cmtitle: `Category:${name}`,
+        cmprop: 'title',
+        cmlimit: 'max',
+        formatversion: 2,
+    })) {
+        for (const m of res.query?.categorymembers || []) titles.push(m.title);
+    }
+    return titles;
+}
+
+// 残りのページをパージ（forcelinkupdate）する件数。リンクの更新には利用者ごとの回数制限（1分あたり30件程度）がある
+const PURGE_BATCH = 25;
+const PURGE_MAX = 100;
+const PURGE_WAIT_MS = 60 * 1000;
+
+/**
+ * 移動元に残っているページを数える。テンプレート経由などで所属しているページは、テンプレートを直しても
+ * 呼び出し先が更新（null edit）されるまでカテゴリに残るので、先にリンクの更新をしてから数え直す
+ * @param {string} name 移動元
+ * @param {Set<string>} skipped このコマンドでスキップしたページ
+ * @returns {Promise<{total: number, skipped: number, purged: boolean}>}
+ */
+async function countRemaining(name, skipped) {
+    const own = new Set([QUEUE_PAGE, EMERGENCY_STOP_PAGE].map(t => t.replace(/_/g, ' ')));
+    // キューページ自体（見出しにコロンなしの [[Category:…]] があると所属する）は数えない
+    const members = async () => (await listMembers(name)).filter(t => !own.has(t.replace(/_/g, ' ')));
+    let titles = await members();
+    let purged = true;
+    for (let i = 0; i < titles.length && i < PURGE_MAX; i += PURGE_BATCH) {
+        if (i > 0) await new Promise(r => setTimeout(r, PURGE_WAIT_MS));
+        try {
+            await bot.purge(titles.slice(i, i + PURGE_BATCH), { forcelinkupdate: true });
+        } catch (e) {
+            purged = false;
+            logger.warning(taskId, `残りのページを更新できませんでした: ${e.message}`);
+            break;
+        }
+    }
+    if (titles.length > PURGE_MAX) purged = false;
+    if (titles.length > 0) titles = await members();
+    return { total: titles.length, skipped: titles.filter(t => skipped.has(t)).length, purged };
 }
 
 /**
@@ -192,7 +243,7 @@ async function processPage(title, command, ctx) {
         const page = await bot.read(title);
         const content = page?.revisions?.[0]?.content;
         if (typeof content !== 'string') throw new Error('本文を取得できませんでした');
-        if (!await allowBots(content, ctx.botUser)) throw new Error('{{bots}}/{{nobots}}により編集が拒否されています');
+        if (!await allowBots(content, ctx.botUser)) throw skipError();
         const r = applyCategoryCommand(content, command);
         if (r.changed) saveDryRun(ctx.id, title, content, r.text);
         return { changed: r.changed, warnings: r.warnings };
@@ -200,7 +251,7 @@ async function processPage(title, command, ctx) {
 
     let replaced = null;
     const res = await bot.edit(title, async rev => {
-        if (!await allowBots(rev.content, ctx.botUser)) throw new Error('{{bots}}/{{nobots}}により編集が拒否されています');
+        if (!await allowBots(rev.content, ctx.botUser)) throw skipError();
         replaced = applyCategoryCommand(rev.content, command);
         if (!replaced.changed) return null;
         return { text: replaced.text, summary: ctx.summary, minor: true, watchlist: 'nochange' };
@@ -301,7 +352,7 @@ async function executeSection(section, opts, record, resumed) {
     targets = targets.slice(0, opts.maxPages);
     const c = record.data.counts;
     // 再開のときは、前回までに処理したページの数も対象に含める
-    record.setCommand(command, discussionLink, c.edited + c.unchanged + c.errors + targets.length);
+    record.setCommand(command, discussionLink, c.edited + c.unchanged + c.skipped + c.errors + targets.length);
     if (targets.length === 0 && !resumed) {
         return { status: '不可能', message: 'カテゴリに操作対象となる所属記事または所属カテゴリがありませんでした' };
     }
@@ -347,8 +398,8 @@ async function executeSection(section, opts, record, resumed) {
             ev = { title, result: r.changed ? 'edited' : 'unchanged', warnings: r.warnings, revid: r.revid, oldrevid: r.oldrevid };
             recordError = r.recordError || null;
         } catch (e) {
-            ev = { title, result: 'error', message: e.message || String(e) };
-            log('warning', `${title}: ${ev.message}`);
+            ev = { title, result: e.skip ? 'skipped' : 'error', message: e.message || String(e) };
+            log(e.skip ? 'info' : 'warning', `${title}: ${ev.message}`);
         }
         if (recordError) ev.message = recordError;
         record.page(ev);
@@ -363,15 +414,19 @@ async function executeSection(section, opts, record, resumed) {
         }
     }
 
-    log(aborted ? 'warning' : 'info', `${stopped ? '緊急停止' : aborted ? `中止（${aborted}）` : '終了'}: 編集${c.edited}件 / 変更なし${c.unchanged}件 / 要確認${c.warnings}件 / エラー${c.errors}件`, true);
+    log(aborted ? 'warning' : 'info', `${stopped ? '緊急停止' : aborted ? `中止（${aborted}）` : '終了'}: 編集${c.edited}件 / 変更なし${c.unchanged}件 / スキップ${c.skipped}件 / 要確認${c.warnings}件 / エラー${c.errors}件`, true);
     if (stopped) return { stopped: true };
     if (aborted) return { status: '中止', message: aborted, counts: { ...c }, fatal: recordFailed };
 
     const notes = [];
     if (command.type === 'reassign' && !opts.dryRun) {
-        const info = await categoryInfo(command.from);
-        if (info.size === 0) notes.push(`${catLink(command.from)}は空になりました。`);
-        else notes.push(`${catLink(command.from)}にはまだ${info.size}件が所属しています。`);
+        // 再開した場合も含め、このコマンドでスキップしたページ
+        const skipped = new Set((readCommandRecord(DATA_DIR, id)?.pages || []).filter(p => p.result === 'skipped').map(p => p.title));
+        const left = await countRemaining(command.from, skipped);
+        const note = left.purged ? '' : '（一部のページは更新できていないため、実際より多いことがあります）';
+        if (left.total === 0) notes.push(`${catLink(command.from)}は空になりました。`);
+        else if (left.skipped > 0) notes.push(`${catLink(command.from)}にはまだ${left.total}件が所属しています（うち{{nobots}}などでスキップしたページ${left.skipped}件）。${note}`);
+        else notes.push(`${catLink(command.from)}にはまだ${left.total}件が所属しています。${note}`);
     }
     return { status: '完了', counts: { ...c }, notes };
 }

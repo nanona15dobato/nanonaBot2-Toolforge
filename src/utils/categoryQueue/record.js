@@ -50,7 +50,7 @@ class CommandRecord {
             command: null,
             discussionLink: null,
             total: null,
-            counts: { edited: 0, unchanged: 0, warnings: 0, errors: 0 },
+            counts: { edited: 0, unchanged: 0, skipped: 0, warnings: 0, errors: 0 },
             notes: [],
             started: false, // キューページに着手の印（{{BOTREQ|着手}} (ID: …)）を付けたか
             reply: null,
@@ -98,11 +98,12 @@ class CommandRecord {
 
     /**
      * 1ページの結果
-     * @param {{title: string, result: 'edited'|'unchanged'|'error', warnings?: string[], message?: string, revid?: number, oldrevid?: number}} ev
+     * @param {{title: string, result: 'edited'|'unchanged'|'skipped'|'error', warnings?: string[], message?: string, revid?: number, oldrevid?: number}} ev
      */
     page(ev) {
         const counts = this.data.counts;
-        counts[{ edited: 'edited', unchanged: 'unchanged', error: 'errors' }[ev.result]] += 1;
+        const key = { edited: 'edited', unchanged: 'unchanged', skipped: 'skipped', error: 'errors' }[ev.result];
+        counts[key] = (counts[key] || 0) + 1;
         if (ev.warnings && ev.warnings.length > 0) counts.warnings += 1;
         try {
             fs.appendFileSync(this.pagesFile, JSON.stringify({ at: new Date().toISOString(), ...ev }) + '\n');
@@ -156,9 +157,9 @@ function reopenCommandRecord(dir, id, opts) {
 
 /** ページの結果から件数を数える */
 function countPages(pages) {
-    const counts = { edited: 0, unchanged: 0, warnings: 0, errors: 0 };
+    const counts = { edited: 0, unchanged: 0, skipped: 0, warnings: 0, errors: 0 };
     for (const p of pages) {
-        const key = { edited: 'edited', unchanged: 'unchanged', error: 'errors' }[p.result];
+        const key = { edited: 'edited', unchanged: 'unchanged', skipped: 'skipped', error: 'errors' }[p.result];
         if (key) counts[key] += 1;
         if (p.warnings && p.warnings.length > 0) counts.warnings += 1;
     }

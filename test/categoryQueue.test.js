@@ -193,6 +193,9 @@ test('編集要約と返信', () => {
         ':{{BOTREQ|完了}} (ID: ID1) 2件を編集しました（変更なし1件・エラー1件）。 [[:Category:A]]は空になりました。 ' +
         '詳細は[https://nanonabot2-01.toolforge.org/queue/ID1 処理結果]を参照してください。 --~~~~');
     assert.equal(
+        formatReply({ status: '完了', id: 'ID4', counts: { edited: 2, unchanged: 0, skipped: 1, warnings: 0, errors: 0 } }),
+        ':{{BOTREQ|完了}} (ID: ID4) 2件を編集しました（スキップ1件）。 詳細は[https://nanonabot2-01.toolforge.org/queue/ID4 処理結果]を参照してください。 --~~~~');
+    assert.equal(
         formatReply({ status: '完了', id: 'ID2', counts: { edited: 3, unchanged: 0, warnings: 0, errors: 0 } }),
         ':{{BOTREQ|完了}} (ID: ID2) 3件を編集しました。 詳細は[https://nanonabot2-01.toolforge.org/queue/ID2 処理結果]を参照してください。 --~~~~');
     assert.equal(
@@ -276,7 +279,7 @@ test('コマンドの記録と読み出し', () => {
         const { record, pages } = readCommandRecord(dir, id);
         assert.equal(record.state, 'done');
         assert.equal(record.status, '完了');
-        assert.deepEqual(record.counts, { edited: 1, unchanged: 0, warnings: 1, errors: 1 });
+        assert.deepEqual(record.counts, { edited: 1, unchanged: 0, skipped: 0, warnings: 1, errors: 1 });
         assert.equal(record.request.requester, 'Alice');
         assert.deepEqual(record.log.map(l => l.message), ['開始']);
         assert.deepEqual(pages.map(p => p.title), ['p1', 'p2']);

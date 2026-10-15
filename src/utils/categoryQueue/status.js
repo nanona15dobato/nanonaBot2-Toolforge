@@ -170,6 +170,7 @@ class QueueStatus {
             done: 0,
             edited: 0,
             unchanged: 0,
+            skipped: 0,
             warnings: 0,
             errors: 0,
             currentTitle: null,
@@ -186,13 +187,13 @@ class QueueStatus {
 
     /**
      * 1ページの結果
-     * @param {{title: string, result: 'edited'|'unchanged'|'error', warnings?: string[], message?: string, revid?: number, oldrevid?: number}} ev
+     * @param {{title: string, result: 'edited'|'unchanged'|'skipped'|'error', warnings?: string[], message?: string, revid?: number, oldrevid?: number}} ev
      */
     pageDone(ev) {
         const c = this.data.current;
         if (c) {
             c.done += 1;
-            c[{ edited: 'edited', unchanged: 'unchanged', error: 'errors' }[ev.result]] += 1;
+            c[{ edited: 'edited', unchanged: 'unchanged', skipped: 'skipped', error: 'errors' }[ev.result]] += 1;
             if (ev.warnings && ev.warnings.length > 0) c.warnings += 1;
             c.currentTitle = null;
         }
