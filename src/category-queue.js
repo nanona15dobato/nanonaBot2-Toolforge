@@ -249,6 +249,19 @@ async function executeSection(section, opts, record, resumed) {
         return { status: '中止', message: `中断している間に見出しが変更されたため中止しました（着手時: ${record.data.heading}）` };
     }
 
+    // 依頼者と依頼日時（キューページの履歴から。失敗しても処理は続ける）。
+    // 不受理・不可能で終わる節も、誰の依頼だったかを残すため、見出しを解釈する前に調べる
+    if (!record.data.request) {
+        try {
+            const request = await identifyRequester(bot, QUEUE_PAGE, section);
+            record.setRequest(request);
+            if (!request.traced) log('warning', '履歴から依頼者を特定できませんでした（古い版までさかのぼれない）');
+            else if (request.signerMatches === false) log('warning', `署名（${request.signer}）と見出しを書き込んだ利用者（${request.requester}）が一致しません`);
+        } catch (e) {
+            log('warning', `依頼者を調べられませんでした: ${e.message}`);
+        }
+    }
+
     const parsed = queue.parseCommandHeading(section.heading);
     if (!parsed.ok) return { status: '不受理', message: parsed.error };
     const command = parsed.command;
@@ -275,18 +288,6 @@ async function executeSection(section, opts, record, resumed) {
         const start = await postStart(section, id);
         if (!start.ok) return { status: '見送り', message: start.reason, skipped: true };
         record.markStarted();
-    }
-
-    // 依頼者と依頼日時（キューページの履歴から。失敗しても処理は続ける）
-    if (!record.data.request) {
-        try {
-            const request = await identifyRequester(bot, QUEUE_PAGE, section);
-            record.setRequest(request);
-            if (!request.traced) log('warning', '履歴から依頼者を特定できませんでした（古い版までさかのぼれない）');
-            else if (request.signerMatches === false) log('warning', `署名（${request.signer}）と見出しを書き込んだ利用者（${request.requester}）が一致しません`);
-        } catch (e) {
-            log('warning', `依頼者を調べられませんでした: ${e.message}`);
-        }
     }
 
     let targets = await listTargets(command);
