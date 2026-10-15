@@ -14,7 +14,17 @@
  * test は MW_NBOT2_USERNAME / MW_NBOT2_PASSWORD、ptw は MW_PTW_USERNAME / MW_PTW_PASSWORD。
  */
 const { Mwn } = require('mwn');
-const { SITES, siteCredentials } = require('../src/utils/categoryQueue/sites');
+// 手元では src/ に、Toolforge の ~/bot ではビルド済みのもの（utils/ が直下）にある
+const { SITES, siteCredentials } = (() => {
+    for (const dir of ['../src', '..', '../dist']) {
+        try {
+            return require(`${dir}/utils/categoryQueue/sites`);
+        } catch (e) {
+            if (e.code !== 'MODULE_NOT_FOUND' || !e.message.includes('categoryQueue/sites')) throw e;
+        }
+    }
+    throw new Error('utils/categoryQueue/sites.js が見つかりません（src/・ビルド済みの utils/・dist/ のどこにもない）');
+})();
 
 const SITE_NAME = (() => {
     const i = process.argv.indexOf('--site');
