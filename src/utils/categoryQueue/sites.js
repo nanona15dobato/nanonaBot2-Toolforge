@@ -7,8 +7,9 @@
  * 試験用のウィキは Bot フラグが無いので assert=bot を付けず、メタの稼働スイッチも見ない。
  *
  * search: {{リダイレクトの所属カテゴリ}} の引数にだけカテゴリ名を書いたページの探し方
- *   cirrus     CirrusSearch の insource: で探す（Wikimedia のウィキ）
- *   embeddedin テンプレートを使っているページをすべて対象にする（CirrusSearch の無い小さなウィキ。
+ *   backlinks  カテゴリにリンクしていて、テンプレートを使っているページ（テンプレートは引数のカテゴリにリンクを出す）。
+ *              リンク表から読むので、検索の索引の遅れや件数の上限が無い
+ *   embeddedin テンプレートを使っているページをすべて対象にする（テンプレートが無く、リンクが出ない試験用のウィキ。
  *              カテゴリ名を含まないページは「変更なし」になるだけ）
  */
 const SITES = {
@@ -19,7 +20,7 @@ const SITES = {
         dataDir: 'data/category-queue',
         assertBot: true,
         taskSwitch: true,
-        search: 'cirrus',
+        search: 'backlinks',
         credentials: ['MW_NBOT2', 'MW'],
     },
     test: {
@@ -29,7 +30,7 @@ const SITES = {
         dataDir: 'data/category-queue-test',
         assertBot: false,
         taskSwitch: false,
-        search: 'cirrus',
+        search: 'embeddedin', // testwiki には {{リダイレクトの所属カテゴリ}} が無い
         credentials: ['MW_NBOT2', 'MW'],
     },
     ptw: {

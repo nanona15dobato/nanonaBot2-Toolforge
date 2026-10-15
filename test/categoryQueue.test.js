@@ -296,7 +296,8 @@ test('--site: 試験用のウィキを選び、認証情報はウィキごとの
     const { resolveSite, siteCredentials, TEST_DATA_DIRS } = require('../src/utils/categoryQueue/sites');
     const ja = resolveSite([]);
     assert.equal(ja.name, 'ja');
-    assert.equal(ja.search, 'cirrus');
+    assert.equal(ja.search, 'backlinks');
+    assert.equal(resolveSite(['--site', 'test']).search, 'embeddedin');
     const ptw = resolveSite(['--site', 'ptw', '--dry-run']);
     assert.equal(new URL(ptw.apiUrl).hostname, 'publictestwiki.com');
     assert.equal(ptw.search, 'embeddedin');

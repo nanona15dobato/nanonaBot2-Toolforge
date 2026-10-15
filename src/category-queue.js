@@ -133,7 +133,7 @@ async function categoryInfo(name) {
 
 /**
  * 操作対象のページ一覧
- * カテゴリのメンバーに加え、{{リダイレクトの所属カテゴリ}}でカテゴリ名を書いているページを検索で拾う
+ * カテゴリのメンバーに加え、{{リダイレクトの所属カテゴリ}}でカテゴリ名を書いているページを拾う（sites.js の search）
  */
 async function listTargets(command) {
     const titles = new Map();
@@ -148,8 +148,25 @@ async function listTargets(command) {
     })) {
         for (const m of res.query?.categorymembers || []) titles.set(m.title, true);
     }
-    if (command.namespaces.includes(0) && SITE.search === 'embeddedin') {
-        // CirrusSearch の無いウィキ: テンプレートを使っているページをすべて対象にする
+    if (command.namespaces.includes(0) && SITE.search === 'backlinks') {
+        // テンプレートは引数のカテゴリにリンクを出す（各グループ20件まで）。リンク表から、カテゴリにリンクしていて
+        // テンプレートを使っているページだけを拾う（検索の索引の遅れ・件数の上限・部分一致の余分が無い）
+        for await (const res of bot.continuedQueryGen({
+            action: 'query',
+            generator: 'backlinks',
+            gbltitle: `Category:${command.from}`,
+            gblnamespace: 0,
+            gbllimit: 'max',
+            prop: 'templates',
+            tltemplates: `Template:${REDIRECT_CATEGORY_TEMPLATES[0]}`,
+            tllimit: 'max',
+            formatversion: 2,
+        })) {
+            // prop の続きの取得では、テンプレートの情報が別の回に付くことがあるので、付いた回で拾う
+            for (const p of res.query?.pages || []) if (p.templates?.length) titles.set(p.title, true);
+        }
+    } else if (command.namespaces.includes(0)) {
+        // テンプレートが無い（リンクが出ない）試験用のウィキ: テンプレートを使っているページをすべて対象にする
         for await (const res of bot.continuedQueryGen({
             action: 'query',
             list: 'embeddedin',
@@ -159,21 +176,6 @@ async function listTargets(command) {
             formatversion: 2,
         })) {
             for (const m of res.query?.embeddedin || []) titles.set(m.title, true);
-        }
-    } else if (command.namespaces.includes(0)) {
-        const search = `insource:"${command.from.replace(/"/g, '')}" hastemplate:"${REDIRECT_CATEGORY_TEMPLATES[0]}"`;
-        for await (const res of bot.continuedQueryGen({
-            action: 'query',
-            list: 'search',
-            srsearch: search,
-            srnamespace: 0,
-            srwhat: 'text',
-            srinfo: '',
-            srprop: '',
-            srlimit: 'max',
-            formatversion: 2,
-        })) {
-            for (const m of res.query?.search || []) titles.set(m.title, true);
         }
     }
     // キューページ・緊急停止ページは対象にしない（見出しにコロンなしの [[Category:…]] を書かれると、
