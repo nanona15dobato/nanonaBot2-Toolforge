@@ -11,6 +11,9 @@
  *              リンク表から読むので、検索の索引の遅れや件数の上限が無い
  *   embeddedin テンプレートを使っているページをすべて対象にする（テンプレートが無く、リンクが出ない試験用のウィキ。
  *              カテゴリ名を含まないページは「変更なし」になるだけ）
+ *
+ * replaceLinks: カテゴリへのリンク（[[:Category:A]]、テンプレートの引数の :Category:A など）も書き換えるか。
+ *   今は無効。環境変数 CATEGORY_QUEUE_REPLACE_LINKS=1 / 0 で、コードを変えずに有効・無効を切り替えられる
  */
 const SITES = {
     ja: {
@@ -21,6 +24,7 @@ const SITES = {
         assertBot: true,
         taskSwitch: true,
         search: 'backlinks',
+        replaceLinks: false,
         credentials: ['MW_NBOT2', 'MW'],
     },
     test: {
@@ -31,6 +35,7 @@ const SITES = {
         assertBot: false,
         taskSwitch: false,
         search: 'embeddedin', // testwiki には {{リダイレクトの所属カテゴリ}} が無い
+        replaceLinks: false,
         credentials: ['MW_NBOT2', 'MW'],
     },
     ptw: {
@@ -41,9 +46,20 @@ const SITES = {
         assertBot: false,
         taskSwitch: false,
         search: 'embeddedin',
+        replaceLinks: false,
         credentials: ['MW_PTW'],
     },
 };
+
+/**
+ * カテゴリへのリンクも書き換えるか（環境変数 CATEGORY_QUEUE_REPLACE_LINKS が 1 / 0 なら、それを優先する）
+ */
+function linksEnabled(site, env = process.env) {
+    const v = env.CATEGORY_QUEUE_REPLACE_LINKS;
+    if (v === '1' || v === 'true') return true;
+    if (v === '0' || v === 'false') return false;
+    return Boolean(site.replaceLinks);
+}
 
 /** 試験用のウィキの記録の置き場所（Web の詳細ページが本番の次に探す） */
 const TEST_DATA_DIRS = Object.values(SITES).filter(s => !s.taskSwitch).map(s => s.dataDir);
@@ -73,4 +89,4 @@ function siteCredentials(site, env = process.env) {
     return { username: undefined, password: undefined };
 }
 
-module.exports = { SITES, TEST_DATA_DIRS, resolveSite, siteCredentials };
+module.exports = { SITES, TEST_DATA_DIRS, resolveSite, siteCredentials, linksEnabled };

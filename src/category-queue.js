@@ -29,7 +29,7 @@ const { editSummary, formatReply, formatStart, catLink } = require('./utils/cate
 const { CommandRecord, readCommandRecord, reopenCommandRecord, listCommandRecords, updateCommandRecord, SkipIndex } = require('./utils/categoryQueue/record');
 const { identifyRequester } = require('./utils/categoryQueue/requester');
 const { QueueStatus } = require('./utils/categoryQueue/status');
-const { SITES, resolveSite, siteCredentials } = require('./utils/categoryQueue/sites');
+const { SITES, resolveSite, siteCredentials, linksEnabled } = require('./utils/categoryQueue/sites');
 const taskId = 'w-ja-nn5';
 const nnversion = '__FILE_HASH__';
 
@@ -40,6 +40,10 @@ const QUEUE_PAGE = SITE.queuePage;
 // 本文（コメントを除く）が「動作中」のときだけ編集する
 const EMERGENCY_STOP_PAGE = SITE.stopPage;
 const DATA_DIR = path.join(__dirname, SITE.dataDir);
+// カテゴリへのリンク（[[:Category:A]]、テンプレートの引数の :Category:A など）も書き換えるか（sites.js。今は無効）
+const REPLACE_LINKS = linksEnabled(SITE);
+// 対象ページの名前空間（listTargets などで分かったもの）。リンクを書き換えてよい名前空間かの判定に使う
+const pageNs = new Map();
 const EDIT_CONFIG = { conflictRetries: 2, suppressNochangeWarning: true };
 // 編集中にキューページを読み直し、節の見出しが変わっていないか確かめる間隔
 // （環境変数 CATEGORY_QUEUE_CHECK_MS で変えられる。試験用）
@@ -191,7 +195,9 @@ async function pagesWritingCategory(titles, command) {
         });
         for (const p of res.query?.pages || []) {
             const content = p.revisions?.[0]?.slots?.main?.content;
-            if (typeof content === 'string' && applyCategoryCommand(content, command).changed) hits.push(p.title);
+            if (typeof content !== 'string') continue;
+            pageNs.set(p.title, TEMPLATE_NS);
+            if (applyCategoryCommand(content, command, replaceOptions(p.title, command)).changed) hits.push(p.title);
         }
     }
     return hits;
@@ -296,7 +302,7 @@ async function listTargets(command) {
         cmlimit: 'max',
         formatversion: 2,
     })) {
-        for (const m of res.query?.categorymembers || []) titles.set(m.title, true);
+        for (const m of res.query?.categorymembers || []) titles.set(m.title, m.ns);
     }
     if (queue.includesNamespace(command.namespaces, 0) && SITE.search === 'backlinks') {
         // テンプレートは引数のカテゴリにリンクを出す（今は各グループ20件まで。モジュール化で21件目以降も出る）。リンク表から、カテゴリにリンクしていて
@@ -313,7 +319,7 @@ async function listTargets(command) {
             formatversion: 2,
         })) {
             // prop の続きの取得では、テンプレートの情報が別の回に付くことがあるので、付いた回で拾う
-            for (const p of res.query?.pages || []) if (p.templates?.length) titles.set(p.title, true);
+            for (const p of res.query?.pages || []) if (p.templates?.length) titles.set(p.title, p.ns);
         }
     } else if (queue.includesNamespace(command.namespaces, 0)) {
         // テンプレートが無い（リンクが出ない）試験用のウィキ: テンプレートを使っているページをすべて対象にする
@@ -325,9 +331,23 @@ async function listTargets(command) {
             eilimit: 'max',
             formatversion: 2,
         })) {
-            for (const m of res.query?.embeddedin || []) titles.set(m.title, true);
+            for (const m of res.query?.embeddedin || []) titles.set(m.title, m.ns);
         }
     }
+    if (command.type === 'reassign' && command.linkNamespaces.length > 0) {
+        // カテゴリへのリンク（テンプレート経由で出るものを含む）があるページ。カテゴリには入っていないことが多い
+        for await (const res of bot.continuedQueryGen({
+            action: 'query',
+            list: 'backlinks',
+            bltitle: `Category:${command.from}`,
+            blnamespace: command.linkNamespaces.join('|'),
+            bllimit: 'max',
+            formatversion: 2,
+        })) {
+            for (const m of res.query?.backlinks || []) titles.set(m.title, m.ns);
+        }
+    }
+    for (const [title, ns] of titles) if (typeof ns === 'number') pageNs.set(title, ns);
     // キューページ・緊急停止ページは対象にしない（見出しにコロンなしの [[Category:…]] を書かれると、
     // キューページ自体がそのカテゴリに入る。書き換えると依頼の見出しが変わってしまう）
     const own = new Set([QUEUE_PAGE, EMERGENCY_STOP_PAGE].map(t => t.replace(/_/g, ' ')));
@@ -337,13 +357,18 @@ async function listTargets(command) {
 // ==========================================
 // コマンドの実行
 // ==========================================
+/** そのページでカテゴリへのリンクも書き換えるか（名前空間の分からないページでは書き換えない） */
+function replaceOptions(title, command) {
+    return { replaceLinks: command.linkNamespaces.includes(pageNs.get(title)) };
+}
+
 async function processPage(title, command, ctx) {
     if (ctx.dryRun) {
         const page = await bot.read(title);
         const content = page?.revisions?.[0]?.content;
         if (typeof content !== 'string') throw new Error('本文を取得できませんでした');
         if (!await allowBots(content, ctx.botUser)) throw skipError();
-        const r = applyCategoryCommand(content, command);
+        const r = applyCategoryCommand(content, command, replaceOptions(title, command));
         if (r.changed) saveDryRun(ctx.id, title, content, r.text);
         return { changed: r.changed, warnings: r.warnings };
     }
@@ -351,7 +376,7 @@ async function processPage(title, command, ctx) {
     let replaced = null;
     const res = await bot.edit(title, async rev => {
         if (!await allowBots(rev.content, ctx.botUser)) throw skipError();
-        replaced = applyCategoryCommand(rev.content, command);
+        replaced = applyCategoryCommand(rev.content, command, replaceOptions(title, command));
         if (!replaced.changed) return null;
         return { text: replaced.text, summary: ctx.summary, minor: true, watchlist: 'nochange' };
     }, { ...EDIT_CONFIG });
@@ -417,6 +442,8 @@ async function executeSection(section, opts, record, resumed) {
     const parsed = queue.parseCommandHeading(section.heading);
     if (!parsed.ok) return { status: '不受理', message: parsed.error };
     const command = parsed.command;
+    // カテゴリへのリンクの書き換えは、有効にしたときだけ（sites.js の replaceLinks）
+    if (!REPLACE_LINKS) command.linkNamespaces = [];
 
     const discussionLink = queue.findDiscussionLink(section.body);
     if (!discussionLink) {

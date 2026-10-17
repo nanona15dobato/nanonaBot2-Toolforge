@@ -96,6 +96,7 @@ data/edit-throttle/<ウィキのホスト名>/
 | `MW_NBOT2_USERNAME` / `MW_NBOT2_PASSWORD` | nanonaBot2 の Bot パスワード（優先） |
 | `MW_USERNAME` / `MW_PASSWORD` | 上が無いときの代わり |
 | `MW_NBOT1_USERNAME` / `MW_NBOT1_PASSWORD` | subster.js 用の優先認証情報 |
+| `CATEGORY_QUEUE_REPLACE_LINKS` | カテゴリキューで、カテゴリへのリンクも書き換えるか（`1` で有効、`0` で無効。未設定なら `sites.js` の `replaceLinks`、今は無効） |
 | `MW_PTW_USERNAME` / `MW_PTW_PASSWORD` | カテゴリキューの試験（`--site ptw`、publictestwiki.com）用。Wikimedia とはアカウントが別 |
 | `TOOL_REPLICA_USER` / `TOOL_REPLICA_PASSWORD` | レプリカ DB。無ければ `~/replica.my.cnf` |
 

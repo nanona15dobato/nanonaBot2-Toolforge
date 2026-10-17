@@ -230,6 +230,45 @@ function replaceInImageRequestTemplates(text, op, warnings) {
 }
 
 // ==========================================
+// 4. カテゴリへのリンク（既定では無効。呼び出し側が replaceLinks で有効にする）
+// ==========================================
+
+// 書き換えない範囲（コメント・<nowiki> など。中の文字列は表示されるだけで、リンクにならない）
+const LINK_PROTECTED = /<!--[\s\S]*?-->|<(nowiki|pre|syntaxhighlight|source|math|code)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
+const escapeRegex = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+// 名前空間の接頭辞は大文字小文字を区別しない
+const caseless = word => [...word].map(c => (c.toUpperCase() !== c.toLowerCase() ? `[${c.toUpperCase()}${c.toLowerCase()}]` : escapeRegex(c))).join('');
+const CATEGORY_PREFIX_PATTERN = `(?:${caseless('category')}|カテゴリ)`;
+
+/** カテゴリ名（先頭の1文字だけ大文字小文字を区別しない。空白と _ は同じ） */
+function categoryNamePattern(name) {
+    const [first, ...rest] = [...name];
+    const head = first.toUpperCase() !== first.toLowerCase() ? `[${first.toUpperCase()}${first.toLowerCase()}]` : escapeRegex(first);
+    return head + rest.join('').split(/[ _]+/).map(escapeRegex).join('[ _]+');
+}
+
+/**
+ * 移動元のカテゴリへのリンクを移動先に書き換える（再配属のときだけ）
+ *   [[:Category:A]] / [[:カテゴリ:A|表示]] / {{テンプレート|:Category:A}} / {{Catlink|Category:A}} など
+ * 「(:)Category:A」の直後が ] | } # < 改行・末尾（空白を挟んでもよい）のときだけ一致させ、「A橋梁」などの別のカテゴリを書き換えない。
+ * 直前が英数字・コロンのもの（[[:commons:Category:A]] などのウィキ間リンク）は、別のウィキのカテゴリなので書き換えない。
+ * カテゴリのタグ（コロンなしの [[Category:A]]）は 1. で書き換え済みなので、ここに残るのはリンクと引数だけ
+ */
+function replaceCategoryLinks(text, op) {
+    if (op.type !== 'reassign' || op.to.length !== 1) return { text, changed: false };
+    const re = new RegExp(`(?<![A-Za-z0-9_:\\-])(:?[ _]*${CATEGORY_PREFIX_PATTERN}[ _]*:[ _]*)(${categoryNamePattern(op.from)})(?=[ _]*(?:[\\]|}#<\\n]|$))`, 'g');
+    let out = '';
+    let last = 0;
+    const rewrite = segment => segment.replace(re, (_, prefix) => `${prefix}${op.to[0]}`);
+    for (const m of text.matchAll(LINK_PROTECTED)) {
+        out += rewrite(text.slice(last, m.index)) + m[0];
+        last = m.index + m[0].length;
+    }
+    out += rewrite(text.slice(last));
+    return { text: out, changed: out !== text };
+}
+
+// ==========================================
 // まとめ
 // ==========================================
 
@@ -237,9 +276,10 @@ function replaceInImageRequestTemplates(text, op, warnings) {
  * @param {string} wikitext
  * @param {{type: 'reassign'|'remove', from: string, to: string[]}} command 移動先 to は再配属で1件
  *        from/to は "Category:" の有無を問わない
+ * @param {{replaceLinks?: boolean}} [options] replaceLinks: カテゴリへのリンクも書き換える（4.）
  * @returns {{text: string, changed: boolean, warnings: string[]}}
  */
-function applyCategoryCommand(wikitext, command) {
+function applyCategoryCommand(wikitext, command, { replaceLinks = false } = {}) {
     const op = {
         type: command.type,
         from: bareCategoryName(command.from),
@@ -249,7 +289,9 @@ function applyCategoryCommand(wikitext, command) {
     let text = wikitext;
     let changed = false;
     // 1つ書き換えるたびに位置が変わるので、段階ごとに解析し直す
-    for (const step of [replaceCategoryTags, replaceInRedirectCategoryTemplates, replaceInImageRequestTemplates]) {
+    const steps = [replaceCategoryTags, replaceInRedirectCategoryTemplates, replaceInImageRequestTemplates];
+    if (replaceLinks) steps.push(replaceCategoryLinks);
+    for (const step of steps) {
         const r = step(text, op, warnings);
         text = r.text;
         changed = changed || r.changed;

@@ -329,3 +329,46 @@ test('{{リダイレクトの所属カテゴリ}}: 21件目以降（モジュー
     assert.match(removed.text, /\|1-24=C25\n\}\}/);
     assert.doesNotMatch(removed.text, /1-25/);
 });
+
+// ==========================================
+// カテゴリへのリンク（既定では無効）
+// ==========================================
+test('カテゴリへのリンク: 有効にしたときだけ、リンクとテンプレートの引数を書き換える', () => {
+    const cmd = { type: 'reassign', from: '日本の橋', to: ['日本の橋梁'] };
+    const links = (text, options = { replaceLinks: true }) => applyCategoryCommand(text, cmd, options).text;
+    // 書き換えるもの
+    assert.equal(links('[[:Category:日本の橋]]'), '[[:Category:日本の橋梁]]');
+    assert.equal(links('[[:カテゴリ:日本の橋|橋の一覧]]'), '[[:カテゴリ:日本の橋梁|橋の一覧]]');
+    assert.equal(links('[[:category:日本の橋 #上]]'), '[[:category:日本の橋梁 #上]]', '接頭辞の大文字小文字・節へのリンク');
+    assert.equal(applyCategoryCommand('[[:Category:日本の_川]]', { type: 'reassign', from: '日本の 川', to: ['日本の河川'] }, { replaceLinks: true }).text,
+        '[[:Category:日本の河川]]', '空白と _ は同じ');
+    assert.equal(links('{{テンプレート|:Category:日本の橋|:Category:Name2}}'), '{{テンプレート|:Category:日本の橋梁|:Category:Name2}}');
+    assert.equal(links('{{Catlink|Category:日本の橋}}'), '{{Catlink|Category:日本の橋梁}}');
+    assert.equal(links('{{T|1=:Category:日本の橋\n}}'), '{{T|1=:Category:日本の橋梁\n}}');
+    // 書き換えないもの
+    assert.equal(links('[[:Category:日本の橋梁]]'), '[[:Category:日本の橋梁]]', '名前の続く別のカテゴリ');
+    assert.equal(links('[[:Category:日本の橋/一覧]]'), '[[:Category:日本の橋/一覧]]', '下位ページ');
+    assert.equal(links('[[:commons:Category:日本の橋]]'), '[[:commons:Category:日本の橋]]', 'ウィキ間リンク');
+    assert.equal(links('<!-- [[:Category:日本の橋]] -->'), '<!-- [[:Category:日本の橋]] -->');
+    assert.equal(links('<nowiki>[[:Category:日本の橋]]</nowiki>'), '<nowiki>[[:Category:日本の橋]]</nowiki>');
+    assert.equal(links('[[:Category:日本の橋]]', {}), '[[:Category:日本の橋]]', '既定では書き換えない');
+    // タグとリンクが両方あるページ
+    assert.equal(links('[[Category:日本の橋|はし]]\n関連: [[:Category:日本の橋]]'), '[[Category:日本の橋梁|はし]]\n関連: [[:Category:日本の橋梁]]');
+    // 除去ではリンクを消さない（移動先が無いので書き換えられない）
+    assert.equal(applyCategoryCommand('[[:Category:A]]', { type: 'remove', from: 'A', to: [] }, { replaceLinks: true }).changed, false);
+    // 先頭の1文字は大文字小文字を区別しない
+    assert.equal(applyCategoryCommand('[[:Category:apple]]', { type: 'reassign', from: 'Apple', to: ['Fruit'] }, { replaceLinks: true }).text, '[[:Category:Fruit]]');
+    assert.equal(applyCategoryCommand('[[:Category:APPLE]]', { type: 'reassign', from: 'Apple', to: ['Fruit'] }, { replaceLinks: true }).changed, false);
+});
+
+test('カテゴリへのリンク: 書き換える名前空間（指定なし: 標準・Template・Category、(記事): 標準・Template、(カテゴリ): なし）と有効化の切り替え', () => {
+    const ns = heading => queue.parseCommandHeading(heading).command.linkNamespaces;
+    assert.deepEqual(ns('Bot: [[:Category:A]]を[[:Category:B]]へ'), [0, 10, 14]);
+    assert.deepEqual(ns('Bot: (記事) [[:Category:A]]を[[:Category:B]]へ'), [0, 10]);
+    assert.deepEqual(ns('Bot: (カテゴリ) [[:Category:A]]を[[:Category:B]]へ'), []);
+    assert.deepEqual(ns('Bot: [[:Category:A]]を除去'), []);
+    const { SITES, linksEnabled } = require('../src/utils/categoryQueue/sites');
+    assert.equal(linksEnabled(SITES.ja, {}), false);
+    assert.equal(linksEnabled(SITES.ja, { CATEGORY_QUEUE_REPLACE_LINKS: '1' }), true);
+    assert.equal(linksEnabled({ replaceLinks: true }, { CATEGORY_QUEUE_REPLACE_LINKS: '0' }), false);
+});
