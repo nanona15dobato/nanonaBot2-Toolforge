@@ -59,7 +59,7 @@
       "reqlink": ":n:ja:ウィキニュース:管理者連絡帳#nanonaBot2へのBotフラグ",
       "retired": { "date": "2026-05-04", "reason": "ウィキニュース日本語版の閉鎖" }
     },
-    "n-ja-PHP1": {
+    "w-ja-PHP1": {
       "status": "active",
       "taskname": "管理者伝言板の対処済み案件のマークアップ",
       "description": "Toolforgeオフライン化に伴う一時的な対応",
