@@ -111,7 +111,7 @@ function validateRegistry(registry, { srcDir, declaredTaskIds } = {}) {
     };
 
     for (const [id, task] of Object.entries(tasks)) {
-        if (!/^[a-z]+-[a-z]+-[a-z]+\d+$/.test(id)) {
+        if (!/^[a-z]+-[a-z]+-[A-Za-z]+\d+$/.test(id)) {
             errors.push(`${id}: タスクIDは "w-ja-nn1" の形式にしてください`);
         }
         if (!STATUSES.includes(task.status)) {

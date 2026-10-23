@@ -66,7 +66,8 @@
       "file": "php1.js",
       "botstemplate": "0",
       "reqlink": "",
-      "job": { "name": "subster", "schedule": "*/10 * * * *" }
+      "execTime": "10分ごと",
+      "job": { "name": "php1", "schedule": "*/10 * * * *" }
     }
   },
   "jobs": {
