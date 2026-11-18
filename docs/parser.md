@@ -24,6 +24,7 @@ const result = parser.parse(wikitext, { templates: true });
 | `{ templates: ['Foo', 'Template:Bar'] }` | 指定した名前のテンプレート（と subst）だけを返す。名前空間が無ければ `Template:` を補う |
 | `{ pageTitle: '利用者:Example/config', templates: true }` | `{{/subpage}}` を `利用者:Example/config/subpage` として解決する。`pageTitle` は解析対象の現在ページ名 |
 | `{ strict: true, templates: true }` | 設定ページ用。閉じていない構文・コメント・保護タグをエラーにする。省略時は従来どおり閉じ忘れを許容する |
+| `{ templateContext: true, templates: true }` | テンプレートの出力に `topLevel` を追加。構文木の直下なら true、他のテンプレート・引数・ref・表等の内部なら false。省略時は従来の出力形を維持 |
 | `{ '!tables': true }` / `{ tables: false }` | その種類だけを除く |
 
 種類は `templates` `variables` `wikilinks` `extlinks` `tables` `headings` `files` `categories` `references` `lists` です。

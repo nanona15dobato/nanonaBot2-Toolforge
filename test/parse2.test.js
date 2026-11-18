@@ -46,6 +46,16 @@ test('テンプレートの絞り込み', () => {
     assert.deepEqual(t.map(x => x.name), ['Template:B', 'Template:C']);
 });
 
+test('templateContextは親構造に基づいてトップレベルを識別し、既定出力を変えない', () => {
+    const text = '{{Root|{{Child}}}}\n<ref>{{RefChild}}</ref>\n{|\n|{{TableChild}}\n|}';
+    const contextual = parse(text, {templates: true, templateContext: true});
+    assert.deepEqual(contextual.templates.map(t => [t.name, t.topLevel]), [
+        ['Template:Root', true], ['Template:Child', false],
+        ['Template:RefChild', false], ['Template:TableChild', false]
+    ]);
+    assert.ok(parse(text, {templates: true}).templates.every(t => !('topLevel' in t)));
+});
+
 test('相対サブページテンプレートは現在ページを基準に解決する', () => {
     const parser = new WikitextParser();
     const r = parser.parse('{{/temp|x}}', {

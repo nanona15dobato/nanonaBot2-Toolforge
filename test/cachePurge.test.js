@@ -31,10 +31,76 @@ test('正常行に続く未閉鎖設定・コメントは正常版と認定し�
     }
     assert.throws(() => parseConfig(good.replace('}}', '|extra=1}}')), /引数/);
     assert.throws(() => parseConfig('{{/temp|__proto__=x|Template:Good|15m|purge}}'), /引数/);
-    assert.throws(() => parseConfig('{{/temp|Template:Good|15m|purge|1=Template:Other}}'), /重複/);
+    assert.equal(parseConfig('{{/temp|Template:Good|15m|purge|1=Template:Other}}')[0].title, 'Template:Other');
     assert.throws(() => parseConfig('{{/temp|Invalid[|15m|purge}}'));
     assert.throws(() => parseConfig(good + '}}'), /開始記号/);
     assert.throws(() => parseConfig(good + '}'), /開始記号/);
+});
+
+test('重複引数はMediaWikiの後勝ちに揃える（Lua共通例）', () => {
+    const rows = fs.readFileSync(path.join(__dirname, 'cases/cache-purge-duplicate.tsv'), 'utf8').trimEnd().split(/\r?\n/);
+    for (const row of rows.filter(row => row && !row.startsWith('#'))) {
+        const [source, page, timing, mode] = row.split('\t');
+        assert.deepEqual(parseConfig(source), [validateItem({1: page, 2: timing, 3: mode})], row);
+    }
+});
+
+test('入れ子の設定は拒否し、正常版へ戻す（展開APIを呼ばない）', async () => {
+    const good = '{{/temp|Template:Good|15m|purge}}';
+    const previous = {lastValidConfig: {content: good, items: parseConfig(good)}, targets: {}};
+    for (const source of [
+        '{{#if:|{{/temp|Template:Hidden|15m|nulledit}}| }}',
+        '{{Other|{{/temp|Template:Hidden|15m|purge}}}}',
+        '{{/temp|Template:Good|15m|purge|1={{/temp|Template:Hidden|15m|purge}}}}',
+        '<ref>{{/temp|Template:Hidden|15m|purge}}</ref>',
+        '{|\n| {{/temp|Template:Hidden|15m|purge}}\n|}'
+    ]) {
+        assert.throws(() => parseConfig(source), /トップレベル/, source);
+        const resolved = resolveConfig(source, previous);
+        assert.equal(resolved.valid, false);
+        assert.deepEqual(resolved.items, previous.lastValidConfig.items);
+        await assert.rejects(expandedTemplates(source, {
+            request: async () => {assert.fail('入れ子設定のためAPIを呼んではいけない');}
+        }, action => action(), titleParser(), 123), /トップレベル/);
+    }
+    assert.equal(parseConfig(`* ${good}\n<!-- {{Other|${good}}} -->\n<nowiki>{{Other|${good}}}</nowiki>`).length, 1);
+});
+
+test('後勝ちで上書きされた展開構文はAPIへ送らない', async () => {
+    const source = '{{/temp|Template:X|{{#expr:4}}m|purge|2=15m}}';
+    const parser = titleParser();
+    const templates = await expandedTemplates(source, {
+        request: async () => assert.fail('勝ち残った値が通常文字列なのでAPI不要')
+    }, action => action(), parser, 123);
+    assert.equal(resolveConfig(source, {}, {templates, parser}).items[0].interval, 900000);
+});
+
+test('設定取得の版IDをREVISIONID展開APIまで引き渡す', async () => {
+    let disk = {targets: {}};
+    const requests = [];
+    const content = '{{/temp|Template:Revision/{{REVISIONID}}|{{#expr:15}}m|purge}}';
+    const result = await main({client: {
+        login: async () => {},
+        read: async (title, options) => {
+            assert.ok(options.rvprop.split('|').includes('ids'));
+            return {revisions: [{content, revid: 7654321, timestamp: '2026-11-18T00:00:00Z'}]};
+        },
+        request: async params => {
+            requests.push(params);
+            if (params.action === 'expandtemplates') {
+                assert.equal(params.revid, 7654321);
+                return {expandtemplates: {wikitext: params.text === '{{#expr:15}}m' ? '15m' : `Template:Revision/${params.revid}`}};
+            }
+            assert.equal(params.action, 'purge');
+            assert.equal(params.titles, 'Template:Revision/7654321');
+            return {purge: [{title: params.titles, purged: true}]};
+        }
+    }, checkStatus: async () => {}, request: action => action(),
+    loadState: () => structuredClone(disk), saveState: state => {disk = structuredClone(state);},
+    clock: () => Date.parse('2026-11-18T00:01:00Z'), log: {info() {}, warning() {}, error() {}}});
+    assert.equal(requests.filter(params => params.action === 'expandtemplates').length, 2);
+    assert.deepEqual(result.purged, ['Template:Revision/7654321']);
+    assert.equal(disk.lastValidConfig.revisionId, 7654321);
 });
 
 test('構文エラー版は正常本文へ復元して通知し、取得版との編集競合を検出する', async () => {

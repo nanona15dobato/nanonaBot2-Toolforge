@@ -445,13 +445,13 @@ class WikitextParser {
         let targetTemplates = [];
 
         if (options && typeof options === 'object' && !Array.isArray(options)) {
-            const hasPositive = Object.entries(options).some(([k, v]) => !['pagetitle', 'strict'].includes(k.toLowerCase()) && !k.startsWith('!') && v !== false);
+            const hasPositive = Object.entries(options).some(([k, v]) => !['pagetitle', 'strict', 'templatecontext'].includes(k.toLowerCase()) && !k.startsWith('!') && v !== false);
             if (hasPositive) {
                 for (let k in config) config[k] = false;
             }
             for (const [k, v] of Object.entries(options)) {
                 let keyName = k.toLowerCase();
-                if (keyName === 'strict') continue;
+                if (keyName === 'strict' || keyName === 'templatecontext') continue;
                 if (keyName === 'pagetitle') {
                     this.relativeTemplateBase = this.normalizeTitle(String(v || ''));
                 } else if (keyName.startsWith('!')) config[keyName.substring(1)] = false;
@@ -483,6 +483,7 @@ class WikitextParser {
             }
         }
         const root = this.buildTree(text, protectedRanges);
+        const topLevelNodes = options?.templateContext ? new Set(root.items) : null;
 
         // 子 → 親の順に処理する（親を組み立てるときに子のマスクが要る）
         const order = [];
@@ -510,6 +511,7 @@ class WikitextParser {
                 }
             } else if (node.type === 'tpl') {
                 const template = this.parseTemplateNode(node, position, original);
+                if (topLevelNodes) template.topLevel = topLevelNodes.has(node);
                 const filtered = (template.type === 'template' || template.type === 'substTemplate') &&
                     targetTemplateSet.size > 0 && !targetTemplateSet.has(template.name);
                 if (config.templates && !filtered) {

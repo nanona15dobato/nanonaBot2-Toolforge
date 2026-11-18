@@ -77,3 +77,22 @@ for rawLine in io.lines('test/cases/cache-purge-expansion.tsv') do
     end
 end
 print(tostring(expansionCount) .. ' parent-frame expansion cases passed')
+
+-- MediaWikiが重複引数を後勝ちで解決した親フレームと、Botの生構文解析を比較する共通例。
+local duplicateCount = 0
+for rawLine in io.lines('test/cases/cache-purge-duplicate.tsv') do
+    local line = rawLine:gsub('\r$', '')
+    if line ~= '' and line:sub(1, 1) ~= '#' then
+        local c = {}
+        for value in (line .. '\t'):gmatch('(.-)\t') do c[#c + 1] = value end
+        local output = module.main({args = {}, getParent = function()
+            return {args = {c[2], c[3], c[4]}}
+        end})
+        assert(not output:find('class="error"', 1, true), line .. '\n' .. output)
+        assert(output:find('[[:' .. c[2] .. '|', 1, true), output)
+        assert(output:find('<code>' .. c[3] .. '</code>', 1, true), output)
+        assert(output:find('<code>' .. c[4] .. '</code>', 1, true), output)
+        duplicateCount = duplicateCount + 1
+    end
+end
+print(tostring(duplicateCount) .. ' duplicate-argument cases passed')

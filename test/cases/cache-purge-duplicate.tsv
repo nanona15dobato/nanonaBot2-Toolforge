@@ -1,0 +1,5 @@
+# raw call<TAB>effective page<TAB>effective timing<TAB>effective mode
+{{/temp|Template:Good|15m|purge|1=Template:Other}}	Template:Other	15m	purge
+{{/temp|1=Template:Other|Template:Good|15m|purge}}	Template:Good	15m	purge
+{{/temp|Template:X|5m|invalid|2=15m|3=nulledit}}	Template:X	15m	nulledit
+{{/temp|1=Template:X|2=5m|2=30m|3=purge}}	Template:X	30m	purge

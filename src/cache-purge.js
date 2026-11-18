@@ -123,12 +123,9 @@ function titleParser(client) {
 
 function validateArgsList(args, argsOrdered) {
     if (Array.isArray(argsOrdered)) {
-        const seen = new Set();
         for (const entry of argsOrdered) {
             const key = String(entry.key);
             if (!['1', '2', '3'].includes(key)) throw new Error('引数は1・2・3のみ指定できます');
-            if (seen.has(key)) throw new Error(`引数 ${key} が重複しています`);
-            seen.add(key);
         }
     }
     if (Object.keys(args).some(key => !['1', '2', '3'].includes(String(key)))) {
@@ -161,11 +158,16 @@ function configTemplates(wikitext, parser = titleParser()) {
     // nowiki等の中は保持し、本物のコメントだけを除去する。
     const comments = parser.findProtectedRanges(wikitext).filter(range => range.prefix === 'COMMENT');
     const text = WikitextParser.applyEdits(wikitext, comments.map(range => ({ ...range, replacement: '' })));
-    return parser.parse(text, {
+    const templates = parser.parse(text, {
         pageTitle: configPage,
         strict: true,
+        templateContext: true,
         templates: [configTemplatePage]
     }).templates.filter(template => template.type === 'template' && template.name === parser.normalizeTitle(configTemplatePage));
+    if (templates.some(template => !template.topLevel)) {
+        throw new Error('設定テンプレート /temp はトップレベルに記述してください（入れ子は禁止です）');
+    }
+    return templates;
 }
 
 function configItems(templates, parser) {
@@ -189,7 +191,7 @@ function parseConfig(wikitext) {
     return configItems(configTemplates(wikitext, parser), parser);
 }
 
-async function expandedTemplates(wikitext, client, request, parser) {
+async function expandedTemplates(wikitext, client, request, parser, revisionId = null) {
     const templates = configTemplates(wikitext, parser);
     const cache = new Map();
     for (const template of templates) {
@@ -203,7 +205,8 @@ async function expandedTemplates(wikitext, client, request, parser) {
                 }
                 try {
                     const result = await request(() => client.request({
-                        action: 'expandtemplates', title: configPage, text: raw, prop: 'wikitext'
+                        action: 'expandtemplates', title: configPage, text: raw, prop: 'wikitext',
+                        ...(revisionId !== null ? { revid: revisionId } : {})
                     }));
                     const expanded = result?.expandtemplates?.wikitext ?? result?.expandtemplates?.['*'];
                     if (typeof expanded !== 'string') throw new Error('展開APIの応答が不正です');
@@ -390,7 +393,7 @@ async function main({ client = bot, checkStatus = checkTaskStatusAndExit, loadSt
     const parser = titleParser(client);
     let resolved;
     try {
-        const templates = await expandedTemplates(content, client, request, parser);
+        const templates = await expandedTemplates(content, client, request, parser, currentRevId);
         resolved = resolveConfig(content, state, { templates, parser });
     } catch (error) {
         if (error.configurationReadError) throw error;
