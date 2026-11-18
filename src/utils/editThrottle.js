@@ -1,118 +1,105 @@
 const fs = require('fs/promises');
 const path = require('path');
 const crypto = require('crypto');
+const { AsyncLocalStorage } = require('node:async_hooks');
 const { setTimeout: sleep } = require('node:timers/promises');
 
-/**
- * nanonaBot2 編集間隔制御
- * 全ジョブ(別プロセス・別Pod)で共有するファイルを使い、
- * 同一ウィキへの編集リクエストの送信間隔を MIN_INTERVAL 以上に保つ。
- *
- *   edit.lock/        … 鍵 (mkdir がアトミックなことを利用)
- *   last-edit         … 最後に編集を送り始めた時刻
- *   priority/<id>     … 通常優先度のジョブが待機中であることを示す札
- *
- * priority: 'low' のBot(大量処理用)は、札が1枚でもあれば編集を譲る。
- */
-const BASE_DIR = path.join(__dirname, '../data/edit-throttle');
+// 全プロセスが同じ共有ディレクトリを使うこと。鍵の自動回収は行わない。
+const BASE_DIR = process.env.EDIT_THROTTLE_DIR || path.join(__dirname, '../data/edit-throttle');
 const MIN_INTERVAL = 5000;
-const STALE_LOCK_MS = 60000;   // 鍵を持ったまま落ちたとみなす時間
-const STALE_PRIORITY_MS = 600000; // 札を立てたまま落ちたとみなす時間
+const applied = Symbol.for('nanonaBot2.editThrottle');
+const slotContext = new AsyncLocalStorage();
 
-function poll() {
-    return sleep(200 + Math.random() * 300);
+async function poll() {
+    await sleep(200 + Math.random() * 300);
 }
 
-async function hasPriorityWaiter(priorityDir) {
-    const names = await fs.readdir(priorityDir).catch(() => []);
-    for (const name of names) {
-        const file = path.join(priorityDir, name);
-        const st = await fs.stat(file).catch(() => null);
-        if (!st) continue;
-        if (Date.now() - st.mtimeMs > STALE_PRIORITY_MS) {
-            await fs.unlink(file).catch(() => {});
-            continue;
+async function acquire(lockDir) {
+    for (;;) {
+        try {
+            await fs.mkdir(lockDir);
+            return;
+        } catch (error) {
+            if (error.code !== 'EEXIST') throw error;
+            await poll();
         }
-        return true;
-    }
-    return false;
-}
-
-async function tryAcquire(lockDir) {
-    try {
-        await fs.mkdir(lockDir);
-        return true;
-    } catch (e) {
-        if (e.code !== 'EEXIST') throw e;
-        const st = await fs.stat(lockDir).catch(() => null);
-        if (st && Date.now() - st.mtimeMs > STALE_LOCK_MS) {
-            await fs.rmdir(lockDir).catch(() => {});
-        }
-        return false;
     }
 }
 
-/**
- * 編集スロットを確保してから fn を実行する
- * @param {string} key 間隔を共有する単位 (ウィキのホスト名)
- * @param {'normal'|'low'} priority
- * @param {() => Promise<any>} fn
- */
-async function withEditSlot(key, priority, fn) {
+async function withEditSlot(key, priority, bot, options, fn) {
+    // mwn の再試行は同じ非同期コンテキストで request を呼ぶ。
+    // 自分の鍵を再取得せず、前の試行から間隔を空ける。
+    const context = slotContext.getStore();
+    if (context?.key === key && context.active) {
+        // 同じ非同期処理からの呼び出しが全て再試行とは限らない。
+        // mwn の retry() が渡す連続した番号と元の bot を確認する。
+        if (context.bot !== bot || options?.retryNumber !== context.retryNumber + 1) {
+            throw new Error('Nested edit is not a sequential mwn retry');
+        }
+        context.retryNumber++;
+        await sleep(MIN_INTERVAL);
+        if (!context.active) throw new Error('Edit throttle slot is no longer active');
+        return fn();
+    }
+
     const dir = path.join(BASE_DIR, key);
     const lockDir = path.join(dir, 'edit.lock');
-    const stampFile = path.join(dir, 'last-edit');
     const priorityDir = path.join(dir, 'priority');
     await fs.mkdir(priorityDir, { recursive: true });
+    const ticket = priority === 'normal'
+        ? path.join(priorityDir, `${process.pid}-${crypto.randomBytes(16).toString('hex')}`)
+        : null;
+    if (ticket) await fs.writeFile(ticket, '', { flag: 'wx' });
 
-    const isLow = priority === 'low';
-    let ticket = null;
-    if (!isLow) {
-        ticket = path.join(priorityDir, `${process.pid}-${crypto.randomBytes(4).toString('hex')}`);
-        await fs.writeFile(ticket, '');
-    }
-
+    let locked = false;
     try {
         for (;;) {
-            if (isLow && await hasPriorityWaiter(priorityDir)) {
+            if (!ticket && (await fs.readdir(priorityDir)).length) {
                 await poll();
                 continue;
             }
-            if (!await tryAcquire(lockDir)) {
+            await acquire(lockDir);
+            locked = true;
+            if (!ticket && (await fs.readdir(priorityDir)).length) {
+                await fs.rmdir(lockDir);
+                locked = false;
                 await poll();
                 continue;
             }
-            try {
-                const last = Number(await fs.readFile(stampFile, 'utf8').catch(() => 0)) || 0;
-                const wait = last + MIN_INTERVAL - Date.now();
-                if (wait > 0) await sleep(wait);
-                // 待っている間に通常優先度のジョブが来たら譲る
-                if (isLow && await hasPriorityWaiter(priorityDir)) continue;
-                await fs.writeFile(stampFile, String(Date.now()));
-                break;
-            } finally {
-                await fs.rmdir(lockDir).catch(() => {});
-            }
+            break;
+        }
+        if (ticket) await fs.unlink(ticket);
+        const slot = { key, bot, active: true, retryNumber: options?.retryNumber || 0 };
+        try {
+            return await slotContext.run(slot, fn);
+        } finally {
+            slot.active = false;
+            // 応答・エラー後も鍵を保持する。共有時計や状態ファイルは不要。
+            await sleep(MIN_INTERVAL);
         }
     } finally {
-        if (ticket) await fs.unlink(ticket).catch(() => {});
+        try {
+            if (ticket) await fs.unlink(ticket).catch(error => {
+                if (error.code !== 'ENOENT') throw error;
+            });
+        } finally {
+            if (locked) await fs.rmdir(lockDir);
+        }
     }
-    return fn();
 }
 
-/**
- * mwn の Bot に編集間隔制御を組み込む
- * edit / save / create などはすべて request({ action: 'edit' }) を通るため、そこを包む
- * @param {import('mwn').Mwn} bot
- * @param {{ priority?: 'normal'|'low' }} [options]
- */
 function applyEditThrottle(bot, { priority = 'normal' } = {}) {
+    if (priority !== 'normal' && priority !== 'low') throw new Error(`Invalid edit throttle priority: ${priority}`);
+    if (bot[applied]) {
+        if (bot[applied] !== priority) throw new Error('Edit throttle already applied with a different priority');
+        return bot;
+    }
     const key = new URL(bot.options.apiUrl).hostname;
-    const orig = bot.request.bind(bot);
-    bot.request = (params, customRequestOptions) =>
-        params?.action === 'edit'
-            ? withEditSlot(key, priority, () => orig(params, customRequestOptions))
-            : orig(params, customRequestOptions);
+    const request = bot.request.bind(bot);
+    bot.request = (params, options) => params?.action === 'edit'
+        ? withEditSlot(key, priority, bot, options, () => request(params, options))
+        : request(params, options);
+    bot[applied] = priority;
     return bot;
 }
 

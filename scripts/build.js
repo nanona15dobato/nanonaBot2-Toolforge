@@ -14,6 +14,7 @@ if (!fs.existsSync(distDir)) {
 
 const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'));
 const overallVersion = pkg.version;
+const registry = loadRegistry();
 
 const versionList = {};
 const declaredTaskIds = {};
@@ -50,32 +51,40 @@ function getFileLastModified(absolutePath) {
 
 files.forEach(srcPath => {
     const relPath = path.relative(srcDir, srcPath);
+    const normalizedRelPath = relPath.replace(/\\/g, '/');
     const distPath = path.join(distDir, relPath);
     const distSubDir = path.dirname(distPath);
 
-    if (!fs.existsSync(distSubDir)) {
-        fs.mkdirSync(distSubDir, { recursive: true });
-    }
-    
     let content = fs.readFileSync(srcPath, 'utf8');
-    
     const hash = crypto.createHash('md5').update(content).digest('hex').slice(0, 8);
-    
-    content = content.replace(/__FILE_HASH__/g, hash);
-    fs.writeFileSync(distPath, content);
-    
+
     // taskIdの抽出と履歴の記録
     const idMatch = content.match(/const\s+taskId\s*=\s*['"]([^'"]+)['"]/);
-    if (idMatch) {
-        const taskId = idMatch[1];
+    const taskId = idMatch ? idMatch[1] : null;
+    if (taskId) {
         if (declaredTaskIds[taskId]) {
             duplicateTaskIdErrors.push(`${taskId}: src/${declaredTaskIds[taskId]} と src/${relPath} で重複して宣言されています`);
         }
         declaredTaskIds[taskId] = relPath;
-        const lastUpdated = getFileLastModified(srcPath);
+    }
 
+    // src/old/ 配下で tasks.json 未登録のアーカイブファイルは配布物・version_info に含めない
+    if (normalizedRelPath.startsWith('old/') && (!taskId || !registry.tasks?.[taskId])) {
+        if (fs.existsSync(distPath)) fs.rmSync(distPath, { force: true });
+        return;
+    }
+
+    if (!fs.existsSync(distSubDir)) {
+        fs.mkdirSync(distSubDir, { recursive: true });
+    }
+
+    content = content.replace(/__FILE_HASH__/g, hash);
+    fs.writeFileSync(distPath, content);
+
+    if (taskId) {
+        const lastUpdated = getFileLastModified(srcPath);
         versionList[taskId] = {
-            file: relPath,
+            file: normalizedRelPath,
             hash: hash,
             last_updated: lastUpdated
         };
@@ -83,7 +92,6 @@ files.forEach(srcPath => {
 });
 
 // タスク台帳の検証
-const registry = loadRegistry();
 const registryErrors = [
     ...duplicateTaskIdErrors,
     ...validateRegistry(registry, { srcDir, declaredTaskIds })

@@ -1,0 +1,7 @@
+# accepted<TAB>raw timing<TAB>expanded timing<TAB>raw mode<TAB>expanded mode<TAB>raw page<TAB>expanded page
+1	15<!--comment-->m	15m	pu<!--comment-->rge	purge	Template:X	Template:X
+1	{{#expr:15}}m	15m	{{lc:PURGE}}	purge	Template:{{#expr:15}}	Template:15
+1	{{#if:1|15m|30m}}	15m	purge	purge	Template:X	Template:X
+0	{{#expr:4}}m	4m	purge	purge	Template:X	Template:X
+0	{{#expr:7}} 9 * * 1	7 9 * * 1	purge	purge	Template:X	Template:X
+0	15m	15m	{{lc:INVALID}}	invalid	Template:X	Template:X

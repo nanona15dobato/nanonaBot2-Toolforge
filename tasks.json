@@ -36,7 +36,7 @@
     "w-ja-nn4": {
       "status": "active",
       "taskname": "種別C:自動Subst展開",
-      "description": "[[:w:ja:Wikipedia:Bot作業依頼/過去ログ/2026年6月#定期作業としてのsubst展開]]",
+      "description": "[[:w:ja:Wikipedia:Bot作業依頼/過去ログ/2026年6月#定期作業としてのsubst展開]]<br />設定ページ：[[:w:ja:利用者:NanonaBot2/w-ja-nn4/data.json]]",
       "file": "subster.js",
       "botstemplate": "1",
       "reqlink": ":w:ja:利用者:NanonaBot2/使用申請#nanonaBot2_20260522",
@@ -50,6 +50,16 @@
       "botstemplate": "1",
       "reqlink": ""
     },
+    "w-ja-nn6": {
+      "status": "active",
+      "taskname": "種別C:[[Template:RfA watchlist notice]]等のキャッシュ破棄",
+      "description": "{{PAGESINCATEGORY}}を組み込んだページの表示を最新に保つため、対象ページのサーバーキャッシュを定期的に破棄する。<br />設定ページ：[[:w:ja:利用者:NanonaBot2/w-ja-nn6/config]]",
+      "file": "cache-purge.js",
+      "botstemplate": "NA",
+      "reqlink": ":w:ja:Wikipedia:Bot作業依頼#キャッシュクリアの定期実行",
+      "job": { "name": "cache-purge", "schedule": "*/5 * * * *" },
+      "execTime": "5分ごとに設定ページを確認（対象ごとの実行間隔・日時指定を適用）"
+    },
     "n-ja-nn1": {
       "status": "retired",
       "taskname": "記事の自動アーカイブ",
@@ -58,16 +68,6 @@
       "botstemplate": "1",
       "reqlink": ":n:ja:ウィキニュース:管理者連絡帳#nanonaBot2へのBotフラグ",
       "retired": { "date": "2026-05-04", "reason": "ウィキニュース日本語版の閉鎖" }
-    },
-    "w-ja-PHP1": {
-      "status": "active",
-      "taskname": "管理者伝言板の対処済み案件のマークアップ",
-      "description": "Toolforgeオフライン化に伴う一時的な対応",
-      "file": "php1.js",
-      "botstemplate": "0",
-      "reqlink": "",
-      "execTime": "10分ごと",
-      "job": { "name": "php1", "schedule": "*/10 * * * *" }
     }
   },
   "jobs": {

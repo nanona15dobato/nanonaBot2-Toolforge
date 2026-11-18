@@ -57,16 +57,21 @@ Toolforge ではツールのホームの `bot/` に `dist/` の中身を置き�
 
 ## 編集間隔制御（utils/editThrottle.js）
 
-すべてのジョブ（別プロセス・別 Pod）で共有するファイルを使い、同じウィキへの編集を **5秒以上** 空けます。
+すべてのジョブ（別プロセス・別 Pod）で共有するディレクトリを使い、同じウィキへの編集を直列化します。応答またはエラーの後も5秒間鍵を保持します。正常に応答した編集の保存間隔は5秒以上です。
 
 ```text
 data/edit-throttle/<ウィキのホスト名>/
-├── edit.lock/   鍵（mkdir がアトミックなことを利用。60秒持ったままなら落ちたとみなす）
-├── last-edit    最後に編集を送り始めた時刻
-└── priority/    通常優先度のジョブが待っていることを示す札（10分で古いとみなす）
+├── edit.lock/   鍵（mkdir による排他）
+└── priority/    通常優先度のジョブが待っていることを示す札
 ```
 
 `applyEditThrottle(bot, { priority })` で mwn の `request({ action: 'edit' })` を包みます。`priority: 'low'`（subster・カテゴリキューなど大量処理）は、札が1枚でもあれば通常優先度のジョブに編集を譲ります。
+
+mwn の再試行は同じ鍵の中で5秒以上空けます。再試行の判別は mwn の `retryNumber` に依存するため、mwn の更新時には再確認が必要です。編集処理内で同じウィキへの別の編集を入れ子で実行すると、デッドロックや排他の迂回を防ぐためエラーになります。
+
+`EDIT_THROTTLE_DIR` で状態ディレクトリを指定できます。全ジョブで共有し、同じバージョンを使用してください。旧版と同時に動かすと保証できません。タイムアウト後もサーバー側で処理が続く場合や、対象外のジョブによる編集は間隔を保証できません。
+
+停止中のプロセスと動作中のプロセスを確実に区別できないため、鍵や札は自動回収しません。強制終了後に残った場合は、該当ウィキの全ジョブを停止し、サーバー側の処理が終わったことを確認してから `edit.lock` と `priority/` 内の札を手動で削除してください。通常優先度のジョブが続くと low は待ち続けます。
 
 ## ログ（utils/logger.js・scripts/archive-logs.js）
 
@@ -99,7 +104,7 @@ data/edit-throttle/<ウィキのホスト名>/
 | `MW_PTW_USERNAME` / `MW_PTW_PASSWORD` | カテゴリキューの試験（`--site ptw`、publictestwiki.com）用。Wikimedia とはアカウントが別 |
 | `TOOL_REPLICA_USER` / `TOOL_REPLICA_PASSWORD` | レプリカ DB。無ければ `~/replica.my.cnf` |
 
-カテゴリキュー（`w-ja-nn5`）と subster は API に `assert=bot` を付け、Bot フラグの無いアカウントでは編集しません。
+カテゴリキュー（`w-ja-nn5`）・キャッシュ破棄（`w-ja-nn6`）・subster（`w-ja-nn4`）は API に `assert=bot` を付け、Bot フラグの無いアカウントでは編集しません。
 
 ## データファイル（data/、デプロイ対象外）
 
@@ -108,6 +113,7 @@ data/edit-throttle/<ウィキのホスト名>/
 | `data/lastTaskData.json` | getTasks.js | 前回の稼働スイッチ |
 | `data/edit-throttle/` | editThrottle.js | 編集間隔制御 |
 | `data/category-queue/` | category-queue.js | 実行状況・コマンドごとの記録（依頼者・実行ログ・ページの結果）・履歴・編集記録（[category-queue.md](category-queue.md#8-記録と取り消し)） |
+| `data/cache-purge/state.json` | cache-purge.js | 直前の正常設定と対象ごとの最終実行履歴 |
 
 ## テスト
 
