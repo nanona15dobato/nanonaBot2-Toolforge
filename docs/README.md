@@ -18,6 +18,7 @@ bot/
 │   ├── sandbox-clean.js     w-ja-nn3 砂場ならし
 │   ├── subster.js           w-ja-nn4 自動subst展開
 │   ├── category-queue.js    w-ja-nn5 カテゴリキューの処理
+│   ├── cache-purge.js       w-ja-nn6 PAGESINCATEGORY使用ページのキャッシュ破棄
 │   ├── old/                 廃止したタスク
 │   └── utils/
 │       ├── parse2.js        wikitext パーサー

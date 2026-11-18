@@ -41,6 +41,8 @@ class WikitextParser {
         // siteinfo を読み込む前の既定値（日本語版ウィキペディアの名前に合わせる）
         this.namespaces.set(0, '');
         this.namespaceAliases.set('', 0);
+        this.namespaces.set(2, '利用者');
+        for (const alias of ['user', '利用者']) this.namespaceAliases.set(alias, 2);
         this.namespaces.set(6, 'ファイル');
         for (const alias of ['file', 'image', 'ファイル', '画像']) this.namespaceAliases.set(alias, 6);
         this.namespaces.set(10, 'Template');
@@ -149,7 +151,7 @@ class WikitextParser {
 
     normalizeTitle(title) {
         title = this.unmask(title);
-        title = title.trim().replace(/_+/g, ' ').replace(/\s+/g, ' ');
+        title = title.replace(/_+/g, ' ').replace(/\s+/g, ' ').trim();
         if (!title) return '';
 
         let colonIdx = title.indexOf(':');
@@ -220,6 +222,7 @@ class WikitextParser {
         const open = (type, start, extra) => stack.push({ type, start, end: -1, items: [], ...extra });
         // 閉じられなかった要素は、中身を親に移して捨てる
         const discardTop = () => {
+            if (this.strict) throw new Error('閉じていないwikitext構文があります');
             const node = stack.pop();
             const parent = stack[stack.length - 1];
             for (const item of node.items) parent.items.push(item);
@@ -254,16 +257,23 @@ class WikitextParser {
             else if (tok === '{|') open('table', idx);
             else if (tok === '}}}') {
                 const depth = findOpen(['param', 'tpl']);
-                if (depth === -1) continue;
+                if (depth === -1) {
+                    if (this.strict) throw new Error('対応する開始記号のない閉じ括弧があります');
+                    continue;
+                }
                 if (stack[depth].type === 'param') {
                     closeAt(depth, idx + 3);
                 } else {
-                    // "}}}" が "}}" + "}" の場合
+                    // "}}}" が "}}" + "}" の場合（strict時は直後にさらに "}" が続かなければ余剰閉じ括弧）
+                    if (this.strict && scan[idx + 3] !== '}') {
+                        throw new Error('対応する開始記号のない閉じ括弧があります');
+                    }
                     closeAt(depth, idx + 2);
                     tokenRe.lastIndex = idx + 2;
                 }
             } else if (tok === '}}') {
                 const depth = findOpen(['tpl']);
+                if (this.strict && depth === -1) throw new Error('対応する開始記号のない閉じ括弧があります');
                 if (depth !== -1) closeAt(depth, idx + 2);
             } else if (tok === ']]') {
                 if (top.type === 'ext') {
@@ -271,21 +281,31 @@ class WikitextParser {
                     tokenRe.lastIndex = idx + 1;
                 } else {
                     const depth = findOpen(['link']);
+                    if (this.strict && depth === -1) throw new Error('対応する開始記号のない閉じ括弧があります');
                     if (depth !== -1) closeAt(depth, idx + 2);
                 }
             } else if (tok === ']') {
                 if (top.type === 'ext') closeAt(stack.length - 1, idx + 1);
             } else if (tok === '|}') {
                 if (top.type === 'table') closeAt(stack.length - 1, idx + 2);
-                else tokenRe.lastIndex = idx + 1;
+                else {
+                    if (this.strict && top.type === 'root' && scan[idx + 2] !== '}') {
+                        throw new Error('対応する開始記号のない閉じ括弧があります');
+                    }
+                    tokenRe.lastIndex = idx + 1;
+                }
             } else if (tok.charAt(1) === '/') {
                 // </ref>
                 const depth = findOpen(['ref']);
+                if (this.strict && depth === -1) throw new Error('閉じていないコメントまたは保護タグがあります');
                 if (depth !== -1) closeAt(depth, idx + tok.length).contentEnd = idx;
             } else {
                 // <ref …> または <ref … />
                 const gt = scan.indexOf('>', idx + 4);
-                if (gt === -1) continue;
+                if (gt === -1) {
+                    if (this.strict) throw new Error('閉じていないコメントまたは保護タグがあります');
+                    continue;
+                }
                 const attrs = text.slice(idx + 4, gt);
                 if (attrs.endsWith('/')) {
                     top.items.push({ type: 'ref', start: idx, end: gt + 1, items: [], selfClosing: true, attrs: attrs.slice(0, -1) });
@@ -298,6 +318,7 @@ class WikitextParser {
         attachProtected(Infinity);
         // 最後まで閉じられなかった要素は、中身をまとめて root に移す。
         // 各段の items は次の段が開く前のものなので、下の段から順に並べれば位置順になる
+        if (this.strict && stack.length > 1) throw new Error('閉じていないwikitext構文があります');
         for (let i = 1; i < stack.length; i++) {
             for (const item of stack[i].items) root.items.push(item);
         }
@@ -414,6 +435,8 @@ class WikitextParser {
         this.maskLengths = new Map();
         this.unmaskCache = new Map();
         this.maskCounter = 0;
+        this.relativeTemplateBase = '';
+        this.strict = Boolean(options?.strict);
 
         let config = {
             templates: true, variables: true, wikilinks: true, extlinks: true, tables: true,
@@ -422,13 +445,16 @@ class WikitextParser {
         let targetTemplates = [];
 
         if (options && typeof options === 'object' && !Array.isArray(options)) {
-            const hasPositive = Object.entries(options).some(([k, v]) => !k.startsWith('!') && v !== false);
+            const hasPositive = Object.entries(options).some(([k, v]) => !['pagetitle', 'strict'].includes(k.toLowerCase()) && !k.startsWith('!') && v !== false);
             if (hasPositive) {
                 for (let k in config) config[k] = false;
             }
             for (const [k, v] of Object.entries(options)) {
                 let keyName = k.toLowerCase();
-                if (keyName.startsWith('!')) config[keyName.substring(1)] = false;
+                if (keyName === 'strict') continue;
+                if (keyName === 'pagetitle') {
+                    this.relativeTemplateBase = this.normalizeTitle(String(v || ''));
+                } else if (keyName.startsWith('!')) config[keyName.substring(1)] = false;
                 else if (v === false) config[keyName] = false;
                 else {
                     config[keyName] = true;
@@ -449,6 +475,13 @@ class WikitextParser {
         const text = String(wikitext ?? '');
         this.source = text;
         const protectedRanges = this.findProtectedRanges(text);
+        if (this.strict) {
+            const outside = blankRanges(text, protectedRanges);
+            const escapePattern = this.escapeTags.join('|');
+            if (new RegExp(`<!--|-->|<\\/?(?:${escapePattern})\\b`, 'i').test(outside)) {
+                throw new Error('閉じていないコメントまたは保護タグがあります');
+            }
+        }
         const root = this.buildTree(text, protectedRanges);
 
         // 子 → 親の順に処理する（親を組み立てるときに子のマスクが要る）
@@ -583,6 +616,10 @@ class WikitextParser {
 
     /** {{名前}} の名前を、名前空間を補って正規化する */
     templateName(raw) {
+        raw = raw.trim();
+        if (raw.startsWith('/') && this.relativeTemplateBase) {
+            return this.normalizeTitle(`${this.relativeTemplateBase}${raw}`);
+        }
         const cIdx = raw.indexOf(':');
         const pfx = cIdx !== -1 ? raw.substring(0, cIdx).trim().toLowerCase() : '';
         if (cIdx === -1 || (!this.namespaceAliases.has(pfx) && !this.interwikiMap.has(pfx))) raw = 'Template:' + raw;

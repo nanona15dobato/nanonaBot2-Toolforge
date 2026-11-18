@@ -104,7 +104,7 @@ mwn の再試行は同じ鍵の中で5秒以上空けます。再試行の判別
 | `MW_PTW_USERNAME` / `MW_PTW_PASSWORD` | カテゴリキューの試験（`--site ptw`、publictestwiki.com）用。Wikimedia とはアカウントが別 |
 | `TOOL_REPLICA_USER` / `TOOL_REPLICA_PASSWORD` | レプリカ DB。無ければ `~/replica.my.cnf` |
 
-カテゴリキュー（`w-ja-nn5`）と subster は API に `assert=bot` を付け、Bot フラグの無いアカウントでは編集しません。
+カテゴリキュー（`w-ja-nn5`）・キャッシュ破棄（`w-ja-nn6`）・subster（`w-ja-nn4`）は API に `assert=bot` を付け、Bot フラグの無いアカウントでは編集しません。
 
 ## データファイル（data/、デプロイ対象外）
 
@@ -113,6 +113,7 @@ mwn の再試行は同じ鍵の中で5秒以上空けます。再試行の判別
 | `data/lastTaskData.json` | getTasks.js | 前回の稼働スイッチ |
 | `data/edit-throttle/` | editThrottle.js | 編集間隔制御 |
 | `data/category-queue/` | category-queue.js | 実行状況・コマンドごとの記録（依頼者・実行ログ・ページの結果）・履歴・編集記録（[category-queue.md](category-queue.md#8-記録と取り消し)） |
+| `data/cache-purge/state.json` | cache-purge.js | 直前の正常設定と対象ごとの最終実行履歴 |
 
 ## テスト
 

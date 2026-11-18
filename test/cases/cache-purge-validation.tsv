@@ -1,0 +1,45 @@
+# accepted<TAB>page<TAB>timing<TAB>mode<TAB>optional extra argument key
+1	Template:RfA watchlist notice	15m	purge
+1	Template:X	5m	forcelinkupdate
+1	Template:X	168h	nulledit
+1	Template:X	1h30m	forcerecursivelinkupdate
+1	Template:X	15M	PURGE
+1	Template:X	7m	purge
+1	Template:A<!--comment-->B	15<!--comment-->m	pu<!--comment-->rge
+1	Template:A_B	15m	purge
+1	Template:AT&T	15m	purge
+1	Template:X	0,30 9 * * 1	purge
+1	Template:X	*/5 0-23/2 * * 0,7	purge
+0	Template:X	4m	purge
+0	Template:X	169h	purge
+0	Template:X	15m	purge,nulledit
+0	Template:X	15m	purge	extra
+0	Template:X	15m	purge	5
+0	Template:X	15m	purge	4
+0	Template:X	15m	
+0		15m	purge
+0	Template:X	bad	purge
+0	Template:X	7 9 * * 1	purge
+0	Template:X	0 9,bad * * *	purge
+0	Template:X	0 *,bad * * *	purge
+0	Template:X	0 9 * * *,8	purge
+0	Template:X	0,,5 9 * * *	purge
+0	Template:X	0 24 * * *	purge
+0	Template:X	0 9 * * 8	purge
+0	Template:X	0/0 9 * * *	purge
+0	Template:X	0 9 * 13 *	purge
+0	Template:X	* * * * *	purge
+0	Invalid[	15m	purge
+0	Template:X#section	15m	purge
+0	Template:{{X}}	15m	purge
+0	Template:A%20B	15m	purge
+0	Template:A&amp;B	15m	purge
+0	/relative	15m	purge
+0	Template:X/../Y	15m	purge
+0	:	15m	purge
+0	Template:X	0/15 * * * *	purge
+0	Template:X	0　9 * * 1	purge
+0	Template:_	15m	purge
+0	_:Template:X	15m	purge
+0	_/subpage	15m	purge
+0	___	15m	purge

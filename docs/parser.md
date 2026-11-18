@@ -22,6 +22,8 @@ const result = parser.parse(wikitext, { templates: true });
 | 省略・`{}` | すべての種類を解析する |
 | `{ templates: true }` | テンプレートだけを解析する。肯定の指定が1つでもあれば、指定したものだけになる |
 | `{ templates: ['Foo', 'Template:Bar'] }` | 指定した名前のテンプレート（と subst）だけを返す。名前空間が無ければ `Template:` を補う |
+| `{ pageTitle: '利用者:Example/config', templates: true }` | `{{/subpage}}` を `利用者:Example/config/subpage` として解決する。`pageTitle` は解析対象の現在ページ名 |
+| `{ strict: true, templates: true }` | 設定ページ用。閉じていない構文・コメント・保護タグをエラーにする。省略時は従来どおり閉じ忘れを許容する |
 | `{ '!tables': true }` / `{ tables: false }` | その種類だけを除く |
 
 種類は `templates` `variables` `wikilinks` `extlinks` `tables` `headings` `files` `categories` `references` `lists` です。
@@ -35,9 +37,9 @@ const result = parser.parse(wikitext, { templates: true });
 | `template:foo_bar` | `Template:Foo bar` | `Template:Foo bar` |
 | `カテゴリ:x` | `Category:X` | `Category:X` |
 | `File:a.jpg` / `画像:a.jpg` | `ファイル:A.jpg` | `ファイル:A.jpg` |
-| `User:Ex` | `User:Ex` | `利用者:Ex` |
+| `User:Ex` | `利用者:Ex` | `利用者:Ex` |
 
-siteinfo を読む前でも、日本語版ウィキペディアのファイル(6)・Template(10)・Category(14) の名前と別名は分かるようにしてあります。siteinfo を読むと、各名前空間の正式名（`canonical`、例: `User`）も別名として登録します。
+siteinfo を読む前でも、日本語版ウィキペディアの利用者(2)・ファイル(6)・Template(10)・Category(14) の名前と別名は分かるようにしてあります。siteinfo を読むと、それ以外の名前空間も含め、各名前空間の正式名（`canonical`、例: `Project`）も別名として登録します。
 
 ## 2. 出力
 

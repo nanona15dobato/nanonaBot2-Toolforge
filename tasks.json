@@ -36,7 +36,7 @@
     "w-ja-nn4": {
       "status": "active",
       "taskname": "種別C:自動Subst展開",
-      "description": "[[:w:ja:Wikipedia:Bot作業依頼/過去ログ/2026年6月#定期作業としてのsubst展開]]",
+      "description": "[[:w:ja:Wikipedia:Bot作業依頼/過去ログ/2026年6月#定期作業としてのsubst展開]]<br />設定ページ：[[:w:ja:利用者:NanonaBot2/w-ja-nn4/data.json]]",
       "file": "subster.js",
       "botstemplate": "1",
       "reqlink": ":w:ja:利用者:NanonaBot2/使用申請#nanonaBot2_20260522",
@@ -49,6 +49,16 @@
       "file": "category-queue.js",
       "botstemplate": "1",
       "reqlink": ""
+    },
+    "w-ja-nn6": {
+      "status": "active",
+      "taskname": "種別C:[[Template:RfA watchlist notice]]等のキャッシュ破棄",
+      "description": "{{PAGESINCATEGORY}}を組み込んだページの表示を最新に保つため、対象ページのサーバーキャッシュを定期的に破棄する。<br />設定ページ：[[:w:ja:利用者:NanonaBot2/w-ja-nn6/config]]",
+      "file": "cache-purge.js",
+      "botstemplate": "NA",
+      "reqlink": ":w:ja:Wikipedia:Bot作業依頼#キャッシュクリアの定期実行",
+      "job": { "name": "cache-purge", "schedule": "*/5 * * * *" },
+      "execTime": "5分ごとに設定ページを確認（対象ごとの実行間隔・日時指定を適用）"
     },
     "n-ja-nn1": {
       "status": "retired",

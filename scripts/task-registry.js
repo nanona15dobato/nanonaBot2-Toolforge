@@ -159,7 +159,10 @@ function validateRegistry(registry, { srcDir, declaredTaskIds } = {}) {
 
     if (declaredTaskIds) {
         for (const [id, file] of Object.entries(declaredTaskIds)) {
-            if (!tasks[id]) errors.push(`${id}: src/${file} で宣言されていますが tasks.json にありません`);
+            const normalizedFile = file.replace(/\\/g, '/');
+            if (!tasks[id] && !normalizedFile.startsWith('old/')) {
+                errors.push(`${id}: src/${normalizedFile} で宣言されていますが tasks.json にありません`);
+            }
         }
     }
 

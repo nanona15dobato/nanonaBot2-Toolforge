@@ -46,6 +46,51 @@ test('テンプレートの絞り込み', () => {
     assert.deepEqual(t.map(x => x.name), ['Template:B', 'Template:C']);
 });
 
+test('相対サブページテンプレートは現在ページを基準に解決する', () => {
+    const parser = new WikitextParser();
+    const r = parser.parse('{{/temp|x}}', {
+        pageTitle: '利用者:NanonaBot2/w-ja-nn6/config',
+        templates: ['利用者:NanonaBot2/w-ja-nn6/config/temp']
+    });
+    assert.deepEqual(r.templates.map(template => template.name), ['利用者:NanonaBot2/w-ja-nn6/config/temp']);
+
+    const mainSpace = parser.parse('{{/sub|x}}', {
+        pageTitle: '東京駅',
+        templates: [':東京駅/sub']
+    });
+    assert.deepEqual(mainSpace.templates.map(template => template.name), ['東京駅/sub']);
+});
+
+test('normalizeTitle は先頭・末尾のアンダースコアも除去して正規化する', () => {
+    const parser = new WikitextParser();
+    assert.equal(parser.normalizeTitle('_foo_bar_'), 'Foo bar');
+    assert.equal(parser.normalizeTitle('___'), '');
+    assert.equal(parser.normalizeTitle('User:Ex'), '利用者:Ex');
+});
+
+test('strict モードは余剰閉じ記号・未閉鎖タグを拒否し、正常な入れ子は通す', () => {
+    for (const broken of [
+        '{{Foo}}}',
+        'Foo]]',
+        '|}',
+        '</ref>',
+        '<ref name="x"',
+        'broken -->',
+        '</nowiki>',
+        '<math>x',
+    ]) {
+        assert.throws(() => parse(broken, { strict: true, templates: true }), undefined, broken);
+    }
+    for (const valid of [
+        '{{Foo|}}',
+        '{{A|{{B}}}}',
+        '{{{1|{{B}}}}}',
+        '[注意] 通常の角括弧（[参照: [[Foo]]]）と矢印 a -> b',
+    ]) {
+        assert.doesNotThrow(() => parse(valid, { strict: true, templates: true }), valid);
+    }
+});
+
 // ==========================================
 // リンク・カテゴリ・ファイル
 // ==========================================
