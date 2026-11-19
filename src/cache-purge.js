@@ -303,8 +303,11 @@ function isDue(item, state, now) {
 function createRequestLimiter(minimumInterval = 1000) {
     let lastStarted = 0;
     return async action => {
-        const wait = minimumInterval - (Date.now() - lastStarted);
-        if (wait > 0) await delay(wait);
+        let wait = minimumInterval - (Date.now() - lastStarted);
+        while (wait > 0) {
+            await delay(wait);
+            wait = minimumInterval - (Date.now() - lastStarted);
+        }
         lastStarted = Date.now();
         return action();
     };
@@ -315,16 +318,13 @@ function isApiFlagSet(obj, key) {
 }
 
 async function nullEdit(item, client = bot, request = action => action()) {
-    const page = await request(() => client.read(item.title, { redirects: false }));
-    const content = page?.revisions?.[0]?.content;
-    if (isApiFlagSet(page, 'missing') || content === undefined) {
-        throw new Error(`空編集対象を読み込めませんでした: ${item.title}`);
-    }
-    const timestamp = page?.revisions?.[0]?.timestamp;
-    if (!timestamp) throw new Error('空編集対象の版時刻がありません');
-    const result = await request(() => client.save(item.title, content, 'Bot: キャッシュ更新', {
-        minor: true, bot: true, nocreate: true, watchlist: 'nochange', basetimestamp: timestamp
-    }));
+    const editClient = Object.create(client);
+    editClient.request = (...args) => request(() => client.request(...args));
+    const result = await editClient.edit(item.title, revision => ({
+        text: revision.content,
+        summary: 'Bot: キャッシュ更新',
+        minor: true, bot: true, watchlist: 'nochange'
+    }), { conflictRetries: 0, suppressNochangeWarning: true });
     if (result?.result !== 'Success' && !result?.nochange) throw new Error(`空編集に失敗しました: ${item.title}`);
 }
 
@@ -343,6 +343,7 @@ async function purge(items, client = bot, request = action => action()) {
     };
     if (mode === 'forcelinkupdate') params.forcelinkupdate = true;
     if (mode === 'forcerecursivelinkupdate') params.forcerecursivelinkupdate = true;
+    // Mwn.purge()はdata.purgeだけを返す。タイトル照合にnormalized/convertedも必要なためrequestを使う。
     const response = await request(() => client.request(params));
     if (!Array.isArray(response?.purge)) throw new Error('purge APIの応答が不正です');
     const aliases = new Map([...(response.normalized || []), ...(response.converted || [])]

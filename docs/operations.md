@@ -106,6 +106,21 @@ mwn の再試行は同じ鍵の中で5秒以上空けます。再試行の判別
 
 カテゴリキュー（`w-ja-nn5`）・キャッシュ破棄（`w-ja-nn6`）・subster（`w-ja-nn4`）は API に `assert=bot` を付け、Bot フラグの無いアカウントでは編集しません。
 
+## Mwnのメソッドの使い分け
+
+既存のカテゴリキュー・substerと同様、処理に応じてMwnのメソッドを選びます。
+
+| メソッド | 用途と注意点 |
+| --- | --- |
+| `bot.read(title, options)` | 本文・版時刻等の取得。版IDが必要なら `rvprop: 'ids|content|timestamp'` を指定する |
+| `bot.edit(title, transform, editConfig)` | 最新本文を読み、変換して保存。Mwnが `basetimestamp`・`starttimestamp`・`nocreate` を設定する。`conflictRetries` は処理の性質に応じて明示する |
+| `bot.save(title, text, summary, options)` | 取得済み本文を基に保存。自動の競合検出はないため、基準版を維持する処理では `basetimestamp`・`nocreate` を明示する |
+| `bot.request(params)` | 専用メソッドがないAPI操作や、応答全体が必要な場合に使う。認証・トークン更新・maxlag等の再試行はMwnに任せる |
+
+キャッシュ破棄タスクの空編集には `edit()` を使い、読み込んだ本文をそのまま返します。競合時はその回を失敗として記録するため `conflictRetries: 0` です。内部の読み取り・保存も最低1秒の間隔制御を通し、既存の編集間隔制御も維持します。設定取得は `read()`、取得時の版を基準にした設定差し戻しは `save()` を使います。
+
+`bot.purge()` はpurge結果配列だけを返します。キャッシュ破棄タスクでは `normalized`・`converted` も必要なので、purgeには `request({ action: 'purge', ... })` を使います。
+
 ## データファイル（data/、デプロイ対象外）
 
 | パス | 書くもの | 内容 |

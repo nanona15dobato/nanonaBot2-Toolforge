@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('fs');
 const path = require('path');
+const { Mwn } = require('mwn');
 const { parseConfig, validateItem, parseInterval, cronMatches, isDue, purge, groupPurgeBatches, resolveConfig, main, expandedTemplates, titleParser } = require('../src/cache-purge');
 const { loadRegistry, validateRegistry } = require('../scripts/task-registry');
 
@@ -136,16 +137,72 @@ test('不正なcronは照合時刻に関係なく拒否する', () => {
 
 test('空編集の競合は中止し、取得版の時刻とnocreateを送る', async () => {
     let saved;
+    const actions = [];
     const conflict = Object.assign(new Error('conflict'), {code: 'editconflict'});
-    await assert.rejects(purge([{title: 'Template:X', mode: 'nulledit'}], {
-        read: async (title, options) => {
-            assert.equal(options.redirects, false);
-            return {revisions: [{content: 'old', timestamp: '2026-11-16T09:00:00Z'}]};
-        },
-        save: async (title, content, summary, options) => { saved = options; throw conflict; }
-    }), {code: 'editconflict'});
+    const client = new Mwn({apiUrl: 'https://example.invalid/w/api.php'});
+    client.request = async params => {
+        actions.push(params.action);
+        if (params.action === 'query') {
+            assert.notEqual(params.redirects, true);
+            return {curtimestamp: '2026-11-16T09:01:00Z', query: {pages: [{
+                revisions: [{timestamp: '2026-11-16T09:00:00Z', slots: {main: {content: 'old'}}}]
+            }]}};
+        }
+        saved = params;
+        throw conflict;
+    };
+    const limitedActions = [];
+    await assert.rejects(purge([{title: 'Template:X', mode: 'nulledit'}], client,
+        action => {limitedActions.push(true); return action();}), {code: 'editconflict'});
+    assert.deepEqual(actions, ['query', 'edit'], '競合時に再試行しない');
+    assert.equal(limitedActions.length, 2, 'Mwn.edit内部の各APIも間隔制御を通る');
     assert.equal(saved.basetimestamp, '2026-11-16T09:00:00Z');
+    assert.equal(saved.starttimestamp, '2026-11-16T09:01:00Z');
     assert.equal(saved.nocreate, true);
+    assert.equal(saved.watchlist, 'nochange');
+    assert.equal(saved.text, 'old');
+});
+
+test('Mwn.editによる空編集は存在しないページを作成しない', async () => {
+    const client = new Mwn({apiUrl: 'https://example.invalid/w/api.php'});
+    client.request = async params => {
+        assert.equal(params.action, 'query', '存在しないページへeditを送ってはいけない');
+        return {query: {pages: [{title: 'Template:Missing', missing: true}]}};
+    };
+    await assert.rejects(purge([{title: 'Template:Missing', mode: 'nulledit'}], client),
+        error => error instanceof Mwn.MissingPageError);
+});
+
+test('実際のMwn.editで空本文を保存し、内部APIの開始間隔も最低1秒を保つ', {timeout: 15000}, async () => {
+    const client = new Mwn({apiUrl: 'https://example.invalid/w/api.php'});
+    client.login = async () => {};
+    client.read = async () => ({revisions: [{content: '{{/temp|Template:Empty|15m|nulledit}}', revid: 123}]});
+    client.save = async () => assert.fail('空編集はMwn.editを使う');
+    const started = [];
+    const rawRequest = async params => {
+        started.push(Date.now());
+        if (params.action === 'query') return {
+            curtimestamp: '2026-11-16T09:01:00Z', query: {pages: [{revisions: [{
+                timestamp: '2026-11-16T09:00:00Z', slots: {main: {content: ''}}
+            }]}]}
+        };
+        assert.equal(params.action, 'edit');
+        assert.equal(params.text, '');
+        assert.equal(params.nocreate, true);
+        return {edit: {result: 'Success', nochange: true}};
+    };
+    client.request = rawRequest;
+    let disk = {targets: {}};
+    const result = await main({client, checkStatus: async () => {},
+        loadState: () => structuredClone(disk), saveState: state => {disk = structuredClone(state);},
+        clock: () => Date.parse('2026-11-16T09:01:00Z'), log: {info() {}, warning() {}, error() {}}
+    });
+    assert.deepEqual(result.failed, []);
+    assert.deepEqual(result.purged, ['Template:Empty']);
+    assert.equal(started.length, 2);
+    assert.ok(started[1] - started[0] >= 1000, `開始間隔: ${started[1] - started[0]}ms`);
+    assert.equal(client.request, rawRequest, '共有クライアントのrequestを変更しない');
+    assert.ok(disk.targets['Template:Empty|nulledit']);
 });
 
 test('cronの1分遅延を拾い、予定時刻をキーに二重実行を防ぐ', () => {
